@@ -275,7 +275,9 @@ Resources:
           - Authorization
           - Content-Type
         AllowMethods:
+          - DELETE
           - GET
+          - PATCH
           - POST
         AllowOrigins:
           - !Ref WebOrigin
@@ -375,6 +377,13 @@ Resources:
             Method: GET
             Path: /v1/progress
             PayloadFormatVersion: "2.0"
+        RepairProgress:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: PATCH
+            Path: /v1/progress
+            PayloadFormatVersion: "2.0"
         ImportProgress:
           Type: HttpApi
           Properties:
@@ -388,6 +397,34 @@ Resources:
             ApiId: !Ref Api
             Method: POST
             Path: /v1/sessions
+            PayloadFormatVersion: "2.0"
+        ListSessions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/sessions
+            PayloadFormatVersion: "2.0"
+        CreateManualSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/sessions/manual
+            PayloadFormatVersion: "2.0"
+        UpdateSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: PATCH
+            Path: /v1/sessions/{cycle}/{problemIndex}
+            PayloadFormatVersion: "2.0"
+        DeleteSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: DELETE
+            Path: /v1/sessions/{cycle}/{problemIndex}
             PayloadFormatVersion: "2.0"
         UndoProgress:
           Type: HttpApi

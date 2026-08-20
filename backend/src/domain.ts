@@ -63,6 +63,10 @@ function timestamp(value: unknown) {
   return new Date(value).toISOString();
 }
 
+function expectedVersion(value: unknown) {
+  return integer(value, "expectedVersion", 0, Number.MAX_SAFE_INTEGER);
+}
+
 export function advance(index: number, cycle: number) {
   return index === PROBLEM_COUNT - 1
     ? { index: 0, cycle: cycle + 1 }
@@ -88,6 +92,50 @@ export function parseUndoInput(value: unknown) {
   if (!isRecord(value)) throw new RequestError("A JSON object is required.");
   return {
     expectedVersion: integer(value.expectedVersion, "expectedVersion", 1, Number.MAX_SAFE_INTEGER),
+  };
+}
+
+export function parseSessionLocator(cycle: unknown, problemIndex: unknown) {
+  const numericCycle = typeof cycle === "string" ? Number(cycle) : cycle;
+  const numericProblemIndex = typeof problemIndex === "string" ? Number(problemIndex) : problemIndex;
+  return {
+    cycle: integer(numericCycle, "cycle", 1, Number.MAX_SAFE_INTEGER),
+    problemIndex: integer(numericProblemIndex, "problemIndex", 0, PROBLEM_COUNT - 1),
+  };
+}
+
+export function parseManualSessionInput(value: unknown) {
+  if (!isRecord(value)) throw new RequestError("A JSON object is required.");
+  return {
+    ...parseSessionLocator(value.cycle, value.problemIndex),
+    expectedVersion: expectedVersion(value.expectedVersion),
+    result: result(value.result),
+    heuristic: heuristic(value.heuristic),
+    finishedAt: timestamp(value.finishedAt),
+  };
+}
+
+export function parseSessionUpdateInput(value: unknown) {
+  if (!isRecord(value)) throw new RequestError("A JSON object is required.");
+  return {
+    expectedVersion: expectedVersion(value.expectedVersion),
+    result: result(value.result),
+    heuristic: heuristic(value.heuristic),
+    finishedAt: timestamp(value.finishedAt),
+  };
+}
+
+export function parseDeleteSessionInput(value: unknown) {
+  if (!isRecord(value)) throw new RequestError("A JSON object is required.");
+  return { expectedVersion: expectedVersion(value.expectedVersion) };
+}
+
+export function parseProgressRepairInput(value: unknown) {
+  if (!isRecord(value)) throw new RequestError("A JSON object is required.");
+  return {
+    index: integer(value.index, "index", 0, PROBLEM_COUNT - 1),
+    cycle: integer(value.cycle, "cycle", 1, Number.MAX_SAFE_INTEGER),
+    expectedVersion: expectedVersion(value.expectedVersion),
   };
 }
 

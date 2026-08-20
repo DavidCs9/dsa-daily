@@ -14,8 +14,13 @@ import {
   IMPORTED_HISTORY_LIMIT,
   type HistoryEntry,
   type Progress,
+  parseDeleteSessionInput,
   parseImportInput,
+  parseManualSessionInput,
+  parseProgressRepairInput,
   parseSessionInput,
+  parseSessionLocator,
+  parseSessionUpdateInput,
   parseUndoInput,
   RequestError,
   sessionKey,
@@ -168,6 +173,217 @@ async function saveSession(pk: string, input: ReturnType<typeof parseSessionInpu
   }
 }
 
+async function createManualSession(pk: string, input: ReturnType<typeof parseManualSessionInput>) {
+  const now = new Date().toISOString();
+  const item: SessionItem = {
+    pk,
+    sk: sessionKey(input.cycle, input.problemIndex),
+    entity: "session",
+    problemIndex: input.problemIndex,
+    cycle: input.cycle,
+    result: input.result,
+    heuristic: input.heuristic,
+    finishedAt: input.finishedAt,
+  };
+
+  try {
+    await documentClient.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: tableName,
+            Item: item,
+            ConditionExpression: "attribute_not_exists(#pk)",
+            ExpressionAttributeNames: { "#pk": "pk" },
+          },
+        },
+        {
+          Update: {
+            TableName: tableName,
+            Key: { pk, sk: "STATE" },
+            ConditionExpression: "(attribute_not_exists(#version) AND :expectedVersion = :zero) OR #version = :expectedVersion",
+            UpdateExpression: "SET #entity = :state, #index = if_not_exists(#index, :zero), #cycle = if_not_exists(#cycle, :one), #version = :nextVersion, #totalSessions = if_not_exists(#totalSessions, :zero) + :one, #updatedAt = :now",
+            ExpressionAttributeNames: {
+              "#entity": "entity",
+              "#index": "index",
+              "#cycle": "cycle",
+              "#version": "version",
+              "#totalSessions": "totalSessions",
+              "#updatedAt": "updatedAt",
+            },
+            ExpressionAttributeValues: {
+              ":state": "state",
+              ":expectedVersion": input.expectedVersion,
+              ":nextVersion": input.expectedVersion + 1,
+              ":zero": 0,
+              ":one": 1,
+              ":now": now,
+            },
+          },
+        },
+      ],
+    }));
+    return { progress: await readProgress(pk), entry: publicHistory(item) };
+  } catch (error) {
+    if ((error as Error).name === "TransactionCanceledException") {
+      throw new RequestError("That session already exists or progress changed on another device.", 409, "progress_conflict");
+    }
+    throw error;
+  }
+}
+
+async function updateSession(
+  pk: string,
+  locator: ReturnType<typeof parseSessionLocator>,
+  input: ReturnType<typeof parseSessionUpdateInput>,
+) {
+  const key = sessionKey(locator.cycle, locator.problemIndex);
+  const now = new Date().toISOString();
+  try {
+    await documentClient.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Update: {
+            TableName: tableName,
+            Key: { pk, sk: key },
+            ConditionExpression: "attribute_exists(#pk)",
+            UpdateExpression: "SET #result = :result, #heuristic = :heuristic, #finishedAt = :finishedAt",
+            ExpressionAttributeNames: {
+              "#pk": "pk",
+              "#result": "result",
+              "#heuristic": "heuristic",
+              "#finishedAt": "finishedAt",
+            },
+            ExpressionAttributeValues: {
+              ":result": input.result,
+              ":heuristic": input.heuristic,
+              ":finishedAt": input.finishedAt,
+            },
+          },
+        },
+        {
+          Update: {
+            TableName: tableName,
+            Key: { pk, sk: "STATE" },
+            ConditionExpression: "#version = :expectedVersion",
+            UpdateExpression: "SET #version = :nextVersion, #updatedAt = :now",
+            ExpressionAttributeNames: { "#version": "version", "#updatedAt": "updatedAt" },
+            ExpressionAttributeValues: {
+              ":expectedVersion": input.expectedVersion,
+              ":nextVersion": input.expectedVersion + 1,
+              ":now": now,
+            },
+          },
+        },
+      ],
+    }));
+    return readProgress(pk);
+  } catch (error) {
+    if ((error as Error).name === "TransactionCanceledException") {
+      throw new RequestError("Session was not found or progress changed on another device.", 409, "progress_conflict");
+    }
+    throw error;
+  }
+}
+
+async function deleteSession(
+  pk: string,
+  locator: ReturnType<typeof parseSessionLocator>,
+  expectedVersion: number,
+) {
+  const key = sessionKey(locator.cycle, locator.problemIndex);
+  const stateResult = await documentClient.send(new GetCommand({ TableName: tableName, Key: { pk, sk: "STATE" } }));
+  const state = stateResult.Item as StateItem | undefined;
+  const deletingUndoTarget = state?.lastSessionKey === key;
+  const now = new Date().toISOString();
+  const updateExpression = deletingUndoTarget
+    ? "SET #version = :nextVersion, #totalSessions = #totalSessions - :one, #updatedAt = :now REMOVE #lastSessionKey, #lastCompletedAt"
+    : "SET #version = :nextVersion, #totalSessions = #totalSessions - :one, #updatedAt = :now";
+
+  try {
+    await documentClient.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Delete: {
+            TableName: tableName,
+            Key: { pk, sk: key },
+            ConditionExpression: "attribute_exists(#pk)",
+            ExpressionAttributeNames: { "#pk": "pk" },
+          },
+        },
+        {
+          Update: {
+            TableName: tableName,
+            Key: { pk, sk: "STATE" },
+            ConditionExpression: "#version = :expectedVersion AND #totalSessions > :zero",
+            UpdateExpression: updateExpression,
+            ExpressionAttributeNames: {
+              "#version": "version",
+              "#totalSessions": "totalSessions",
+              "#updatedAt": "updatedAt",
+              ...(deletingUndoTarget ? { "#lastSessionKey": "lastSessionKey", "#lastCompletedAt": "lastCompletedAt" } : {}),
+            },
+            ExpressionAttributeValues: {
+              ":expectedVersion": expectedVersion,
+              ":nextVersion": expectedVersion + 1,
+              ":zero": 0,
+              ":one": 1,
+              ":now": now,
+            },
+          },
+        },
+      ],
+    }));
+    return readProgress(pk);
+  } catch (error) {
+    if ((error as Error).name === "TransactionCanceledException") {
+      throw new RequestError("Session was not found or progress changed on another device.", 409, "progress_conflict");
+    }
+    throw error;
+  }
+}
+
+async function repairProgress(pk: string, input: ReturnType<typeof parseProgressRepairInput>) {
+  const now = new Date().toISOString();
+  try {
+    await documentClient.send(new TransactWriteCommand({
+      TransactItems: [{
+        Update: {
+          TableName: tableName,
+          Key: { pk, sk: "STATE" },
+          ConditionExpression: "(attribute_not_exists(#version) AND :expectedVersion = :zero) OR #version = :expectedVersion",
+          UpdateExpression: "SET #entity = :state, #index = :index, #cycle = :cycle, #version = :nextVersion, #totalSessions = if_not_exists(#totalSessions, :zero), #updatedAt = :now REMOVE #lastSessionKey, #lastCompletedAt",
+          ExpressionAttributeNames: {
+            "#entity": "entity",
+            "#index": "index",
+            "#cycle": "cycle",
+            "#version": "version",
+            "#totalSessions": "totalSessions",
+            "#updatedAt": "updatedAt",
+            "#lastSessionKey": "lastSessionKey",
+            "#lastCompletedAt": "lastCompletedAt",
+          },
+          ExpressionAttributeValues: {
+            ":state": "state",
+            ":index": input.index,
+            ":cycle": input.cycle,
+            ":expectedVersion": input.expectedVersion,
+            ":nextVersion": input.expectedVersion + 1,
+            ":zero": 0,
+            ":now": now,
+          },
+        },
+      }],
+    }));
+    return readProgress(pk);
+  } catch (error) {
+    if ((error as Error).name === "TransactionCanceledException") {
+      throw new RequestError("Progress changed on another device. Reload and try again.", 409, "progress_conflict");
+    }
+    throw error;
+  }
+}
+
 async function undo(pk: string, expectedVersion: number) {
   const [stateResult, sessionsResult] = await Promise.all([
     documentClient.send(new GetCommand({ TableName: tableName, Key: { pk, sk: "STATE" } })),
@@ -306,8 +522,39 @@ app.use(async ({ reqCtx, next }) => {
 
 app.get("/v1/progress", async ({ get }) => ({ progress: await readProgress(get("pk")!) }));
 
+app.get("/v1/sessions", async ({ get }) => {
+  const progress = await readProgress(get("pk")!);
+  return { sessions: progress.history, totalSessions: progress.totalSessions };
+});
+
 app.post("/v1/sessions", async ({ get, req }) =>
   saveSession(get("pk")!, parseSessionInput(await requestBody(req))));
+
+app.post("/v1/sessions/manual", async ({ get, req }) =>
+  createManualSession(get("pk")!, parseManualSessionInput(await requestBody(req))));
+
+app.patch("/v1/sessions/:cycle/:problemIndex", async ({ get, params, req }) => ({
+  progress: await updateSession(
+    get("pk")!,
+    parseSessionLocator(params.cycle, params.problemIndex),
+    parseSessionUpdateInput(await requestBody(req)),
+  ),
+}));
+
+app.delete("/v1/sessions/:cycle/:problemIndex", async ({ get, params, req }) => {
+  const input = parseDeleteSessionInput(await requestBody(req));
+  return {
+    progress: await deleteSession(
+      get("pk")!,
+      parseSessionLocator(params.cycle, params.problemIndex),
+      input.expectedVersion,
+    ),
+  };
+});
+
+app.patch("/v1/progress", async ({ get, req }) => ({
+  progress: await repairProgress(get("pk")!, parseProgressRepairInput(await requestBody(req))),
+}));
 
 app.post("/v1/progress/undo", async ({ get, req }) => {
   const input = parseUndoInput(await requestBody(req));
