@@ -26,6 +26,9 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(problems, /Reverse Integer/);
   assert.match(app, /Easy: 10, Medium: 20, Hard: 30/);
   assert.match(app, /Save & advance/);
+  assert.match(app, /Focused minutes/);
+  assert.match(app, /Time not recorded/);
+  assert.match(app, /deadlineRef/);
   assert.match(app, /Set next problem/);
   assert.match(app, /Past sessions/);
   assert.match(app, /Activity calendar/);

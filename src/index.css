@@ -193,12 +193,15 @@ footer { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 20px 0;
 .historyItem { padding: 17px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); }
 .historyBody { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .historyBody strong, .editForm strong { font-size: 13px; line-height: 1.35; }
-.historyBody > span { color: var(--muted); font-size: 11px; }
+.sessionMeta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.sessionMeta > span { color: var(--muted); font-size: 11px; }
+.timeSpent { border-radius: 99px; padding: 4px 7px; color: #7d3b20; background: #ffe3d3; font-family: Arial, Helvetica, sans-serif; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.timeSpent.missingTime { color: #79838a; background: #e9edeb; font-weight: 500; }
 .historyBody p { margin: 3px 0 0; color: #4f5b64; font-family: Georgia, 'Times New Roman', serif; font-size: 13px; font-style: italic; line-height: 1.4; }
 .itemActions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
 .dangerButton { border: 0; padding: 2px; color: #a14b40; background: transparent; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
 .editForm { width: 100%; margin-top: 0; }
-.editRow { grid-template-columns: .8fr 1.4fr; }
+.editRow { grid-template-columns: .75fr 1.35fr .8fr; }
 .emptyHistory { margin: 0; padding: 26px 0; border-top: 1px solid var(--line); color: var(--muted); font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-size: 13px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
