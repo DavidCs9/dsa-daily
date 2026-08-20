@@ -28,6 +28,8 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(app, /Save & advance/);
   assert.match(app, /Set next problem/);
   assert.match(app, /Past sessions/);
+  assert.match(app, /Activity calendar/);
+  assert.match(app, /Best streak/);
   assert.match(app, /completed/);
   assert.match(app, /Next/);
 });
