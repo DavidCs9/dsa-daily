@@ -9,7 +9,7 @@ test("builds a standalone Vite application", async () => {
     readdir(new URL("../dist/assets/", import.meta.url)),
   ]);
 
-  assert.match(html, /<title>DSA Daily<\/title>/i);
+  assert.match(html, /<title>DSA Ready<\/title>/i);
   assert.match(html, /id="root"/);
   assert.ok(assets.some((name) => name.endsWith(".js")));
   assert.ok(assets.some((name) => name.endsWith(".css")));
@@ -35,6 +35,10 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(app, /Best streak/);
   assert.match(app, /completed/);
   assert.match(app, /Next/);
+  assert.match(app, /DSA Ready/);
+  assert.match(app, /Good work\. The next problem is ready\./);
+  assert.match(app, /className="signOutButton"/);
+  assert.doesNotMatch(app, />History<\/button>/);
 });
 
 test("uses private static hosting and an authenticated serverless persistence API", async () => {

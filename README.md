@@ -1,4 +1,4 @@
-# DSA Daily
+# DSA Ready
 
 A low-friction NeetCode 150 practice loop: open the next problem, work against a difficulty-based timer, record the outcome, and advance automatically.
 

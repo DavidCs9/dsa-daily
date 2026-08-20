@@ -126,13 +126,12 @@ function LoginScreen({ onSignedIn }: { onSignedIn: (user: AuthUser) => void }) {
   return (
     <main className="authShell">
       <section className="authCard" aria-labelledby="sign-in-title">
-        <a className="brand authBrand" href="#top" aria-label="DSA Daily home">
-          <span className="brandMark">D</span>
-          <span>DSA Daily</span>
+        <a className="brand authBrand" href="#top" aria-label="DSA Ready home">
+          <span>DSA Ready</span>
         </a>
-        <p className="eyebrow"><span>Welcome back</span></p>
-        <h1 id="sign-in-title">Keep the loop warm.</h1>
-        <p className="authIntro">Sign in with your existing account. Your next problem stays in sync on every device.</p>
+        <p className="eyebrow"><span>Daily practice</span></p>
+        <h1 id="sign-in-title">Stay ready.</h1>
+        <p className="authIntro">Sign in to continue with your next problem. Your progress stays in sync on every device.</p>
         <form className="authForm" onSubmit={submit}>
           <label htmlFor="email">Email</label>
           <input id="email" autoComplete="username" inputMode="email" required type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -146,7 +145,7 @@ function LoginScreen({ onSignedIn }: { onSignedIn: (user: AuthUser) => void }) {
   );
 }
 
-function DailySession({ user, onSignedOut }: { user: AuthUser; onSignedOut: () => void }) {
+function DailySession({ onSignedOut }: { onSignedOut: () => void }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -184,7 +183,7 @@ function DailySession({ user, onSignedOut }: { user: AuthUser; onSignedOut: () =
     );
   }
   if (!progress) return <main className="loading" aria-label="Loading progress" />;
-  return <SessionView progress={progress} setProgress={setProgress} user={user} onSignedOut={onSignedOut} />;
+  return <SessionView progress={progress} setProgress={setProgress} onSignedOut={onSignedOut} />;
 }
 
 function ActivityCalendar({ history }: { history: HistoryEntry[] }) {
@@ -487,12 +486,10 @@ function HistoryManager({
 function SessionView({
   progress,
   setProgress,
-  user,
   onSignedOut,
 }: {
   progress: Progress;
   setProgress: (progress: Progress) => void;
-  user: AuthUser;
   onSignedOut: () => void;
 }) {
   const problem = problems[progress.index] ?? problems[0];
@@ -639,9 +636,8 @@ function SessionView({
   return (
     <main className="shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="DSA Daily home">
-          <span className="brandMark">D</span>
-          <span>DSA Daily</span>
+        <a className="brand" href="#top" aria-label="DSA Ready home">
+          <span>DSA Ready</span>
         </a>
         <div className="headerRight">
           <div className="headerProgress" aria-label={`Cycle ${progress.cycle}, ${completedThisCycle} problems completed, next problem ${progress.index + 1}`}>
@@ -653,8 +649,17 @@ function SessionView({
             <span className="streakDot" />
             <span><strong>{activity.currentStreak}</strong> day{activity.currentStreak === 1 ? "" : "s"} streak</span>
           </button>
-          <button className="accountButton" onClick={() => setManaging(true)} type="button">History</button>
-          <button className="accountButton" onClick={onSignedOut} title={`Signed in as ${user.signInDetails?.loginId ?? user.username}`} type="button">Sign out</button>
+          <button
+            className="signOutButton"
+            onClick={onSignedOut}
+            aria-label="Sign out"
+            title="Sign out"
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M10 5H6.75A1.75 1.75 0 0 0 5 6.75v10.5C5 18.22 5.78 19 6.75 19H10M14.5 8l4 4-4 4M18 12H9" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -663,7 +668,7 @@ function SessionView({
           <div className="successNote">
             <span className="successIcon">✓</span>
             <div>
-              <strong>Logged. Problem {progress.index + 1} is ready.</strong>
+              <strong>Good work. The next problem is ready.</strong>
               <button disabled={saving} onClick={() => void undoLast()} type="button">Undo</button>
             </div>
           </div>
@@ -728,7 +733,7 @@ function SessionView({
       </section>
 
       <footer>
-        <span>One problem. Clean execution. Come back tomorrow.</span>
+        <span>The job is not finished. Come back tomorrow.</span>
         {progress.totalSessions > 0 ? <span>{progress.totalSessions} total sessions synced</span> : null}
       </footer>
       {managing ? <HistoryManager progress={progress} onProgress={setProgress} onClose={() => setManaging(false)} /> : null}
@@ -768,5 +773,5 @@ export default function App() {
   }
   if (checkingAuth) return <main className="loading" aria-label="Checking sign-in" />;
   if (!user) return <LoginScreen onSignedIn={setUser} />;
-  return <DailySession key={user.userId} user={user} onSignedOut={() => void signOutCurrentUser()} />;
+  return <DailySession key={user.userId} onSignedOut={() => void signOutCurrentUser()} />;
 }
