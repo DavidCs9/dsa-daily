@@ -64,7 +64,12 @@ The deploy command builds the Vite app, applies `template.yaml` with SAM, upload
 
 ## GitHub release workflow
 
-Pull requests to `main` run the complete test, build, lint, and infrastructure validation gate. A merge to `main` repeats the gate and then deploys through AWS OIDC.
+Pull requests to `main` run the complete test, build, lint, and infrastructure validation gate. On a merge to `main`, the workflow classifies the changed files before requesting AWS credentials:
+
+- Frontend and build-input changes publish a fresh Vite build to S3 and invalidate CloudFront.
+- Application infrastructure changes deploy CloudFormation, then rebuild and publish the frontend.
+- Documentation, tests, lint configuration, and workflow-only changes skip AWS deployment.
+- Bootstrap-role changes are reported separately because the application release role cannot safely update itself.
 
 Add a repository variable named `AWS_DEPLOY_ROLE_ARN` containing the ARN of the AWS role trusted by this repository's `main` branch. No long-lived AWS access keys are stored in GitHub. Until the variable exists, the deployment job is intentionally skipped while pull-request checks continue to work.
 
