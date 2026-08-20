@@ -41,7 +41,12 @@ jobs:
         run: npm run infra:validate
 
   deploy:
-    if: github.event_name == 'push' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    if: >-
+      github.event_name == 'push' &&
+      vars.AWS_DEPLOY_ROLE_ARN != '' &&
+      vars.APP_CERTIFICATE_ARN != '' &&
+      vars.APP_DOMAIN_NAME != '' &&
+      vars.HOSTED_ZONE_ID != ''
     needs: quality
     runs-on: ubuntu-latest
     permissions:
@@ -66,12 +71,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Set up AWS SAM
-        uses: aws-actions/setup-sam@v3
-        with:
-          use-installer: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure short-lived AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.2.3
         with:
@@ -80,7 +79,17 @@ jobs:
           aws-region: us-east-2
 
       - name: Deploy infrastructure
-        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+        run: >-
+          aws cloudformation deploy
+          --template-file template.yaml
+          --stack-name dsa-daily
+          --region us-east-2
+          --no-fail-on-empty-changeset
+          --parameter-overrides
+          EnableCustomDomain=true
+          AppDomainName=${{ vars.APP_DOMAIN_NAME }}
+          CertificateArn=${{ vars.APP_CERTIFICATE_ARN }}
+          HostedZoneId=${{ vars.HOSTED_ZONE_ID }}
 
       - name: Publish static files
         run: npm run publish

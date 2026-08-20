@@ -7,4 +7,4 @@ s3_prefix = "dsa-daily"
 region = "us-east-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "EnableCustomDomain=\"false\" AppDomainName=\"\" CertificateArn=\"\" HostedZoneId=\"\""
+parameter_overrides = "EnableCustomDomain=\"true\" AppDomainName=\"dsa.castrodavid.dev\" CertificateArn=\"arn:aws:acm:us-east-1:225989371926:certificate/73206bd1-9902-4c9e-92e5-8489a10b6f26\" HostedZoneId=\"Z09057602V6K42SQPOMLC\""

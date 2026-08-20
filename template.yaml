@@ -30,11 +30,12 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-      BucketOwnershipControls:
+      OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
       PublicAccessBlockConfiguration:
@@ -44,6 +45,11 @@ Resources:
         RestrictPublicBuckets: true
       VersioningConfiguration:
         Status: Enabled
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
 
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -67,8 +73,6 @@ Resources:
         ParametersInCacheKeyAndForwardedToOrigin:
           CookiesConfig:
             CookieBehavior: none
-          EnableAcceptEncodingBrotli: true
-          EnableAcceptEncodingGzip: true
           HeadersConfig:
             HeaderBehavior: none
           QueryStringsConfig:
@@ -96,6 +100,11 @@ Resources:
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
       DistributionConfig:
         Aliases: !If
           - HasCustomDomain

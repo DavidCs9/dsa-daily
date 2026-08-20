@@ -50,12 +50,14 @@ Pull requests to `main` run the complete test, build, lint, and infrastructure v
 
 Add a repository variable named `AWS_DEPLOY_ROLE_ARN` containing the ARN of the AWS role trusted by this repository's `main` branch. No long-lived AWS access keys are stored in GitHub. Until the variable exists, the deployment job is intentionally skipped while pull-request checks continue to work.
 
-For the first deployment, the default CloudFront URL works without domain parameters. To use the existing domain, set these values in `samconfig.toml`:
+The production URL is `https://dsa.castrodavid.dev`. The deployment values are recorded in `samconfig.toml`:
 
 - `EnableCustomDomain="true"`
 - `AppDomainName`
 - `CertificateArn`
 - `HostedZoneId`
+
+The reproducible `bootstrap/github-release.yaml` stack creates the CloudFront certificate and the GitHub OIDC role. The role trusts only this repository's protected `main` branch and is exposed to the workflow through repository variables.
 
 ## Useful commands
 
