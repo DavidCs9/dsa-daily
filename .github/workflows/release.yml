@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test and build
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Set up AWS SAM
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate infrastructure
+        run: npm run infra:validate
+
+  deploy:
+    if: github.event_name == 'push' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: dsa-daily-production
+      cancel-in-progress: false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Set up AWS SAM
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: dsa-daily-release
+          aws-region: us-east-2
+
+      - name: Deploy infrastructure
+        run: sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+
+      - name: Publish static files
+        run: npm run publish
