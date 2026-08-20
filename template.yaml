@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: DSA Daily static web application infrastructure
+Description: DSA Daily static web application and serverless progress API
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
@@ -14,12 +14,23 @@ Parameters:
     Description: Fully qualified domain name for the app, for example dsa.example.com.
   CertificateArn:
     Type: String
-    Default: ""
+    Default: arn:aws:acm:us-east-1:225989371926:certificate/73206bd1-9902-4c9e-92e5-8489a10b6f26
+    AllowedPattern: "^arn:aws[a-zA-Z-]*:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$"
     Description: ARN of an ACM certificate in us-east-1 that covers AppDomainName.
   HostedZoneId:
     Type: String
     Default: ""
     Description: Route 53 public hosted zone ID for AppDomainName.
+  WebOrigin:
+    Type: String
+    Default: https://dsa.castrodavid.dev
+    AllowedPattern: "^https://[a-z0-9.-]+$"
+    Description: Production browser origin allowed to call the API.
+  ExistingUserPoolId:
+    Type: String
+    Default: us-east-2_7LKDrgjB7
+    AllowedPattern: "^us-east-2_[A-Za-z0-9]+$"
+    Description: Existing us-east-2 Cognito user pool shared with this application.
 
 Conditions:
   HasCustomDomain: !Equals [!Ref EnableCustomDomain, "true"]
@@ -181,6 +192,225 @@ Resources:
             HostedZoneId: Z2FDTNDATAQYW2
             EvaluateTargetHealth: false
 
+  SpaUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      AccessTokenValidity: 1
+      AuthSessionValidity: 3
+      ClientName: !Sub "${AWS::StackName}-spa"
+      EnableTokenRevocation: true
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      GenerateSecret: false
+      IdTokenValidity: 1
+      PreventUserExistenceErrors: ENABLED
+      ReadAttributes:
+        - email
+        - email_verified
+      RefreshTokenValidity: 30
+      SupportedIdentityProviders:
+        - COGNITO
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      UserPoolId: !Ref ExistingUserPoolId
+
+  ProgressTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "${AWS::StackName}-progress"
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/api-gateway/${AWS::StackName}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}'
+      Auth:
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              audience:
+                - !Ref SpaUserPoolClient
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${ExistingUserPoolId}"
+        DefaultAuthorizer: CognitoJwtAuthorizer
+      CorsConfiguration:
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+        AllowOrigins:
+          - !Ref WebOrigin
+          - http://localhost:3000
+          - http://localhost:5173
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+      StageName: $default
+      Tags:
+        Project: dsa-daily
+        ManagedBy: CloudFormation
+
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-api"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-api-${AWS::Region}"
+      Description: Reads and updates DSA Daily progress for authenticated users.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: dsa-daily-api
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteFunctionLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-api:*"
+              - Sid: ManageUserProgress
+                Effect: Allow
+                Action:
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:TransactWriteItems
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt ProgressTable.Arn
+              - Sid: PublishTraces
+                Effect: Allow
+                Action:
+                  - xray:PutTelemetryRecords
+                  - xray:PutTraceSegments
+                Resource: "*"
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ApiFunctionLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/handler.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2022
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: backend/
+      Description: Authenticated DSA Daily progress API.
+      Environment:
+        Variables:
+          POWERTOOLS_LOG_LEVEL: INFO
+          POWERTOOLS_SERVICE_NAME: dsa-daily-api
+          TABLE_NAME: !Ref ProgressTable
+      Events:
+        GetProgress:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: GET
+            Path: /v1/progress
+            PayloadFormatVersion: "2.0"
+        ImportProgress:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/progress/import
+            PayloadFormatVersion: "2.0"
+        LogSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/sessions
+            PayloadFormatVersion: "2.0"
+        UndoProgress:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /v1/progress/undo
+            PayloadFormatVersion: "2.0"
+      FunctionName: !Sub "${AWS::StackName}-api"
+      Handler: src/handler.handler
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+        SystemLogLevel: INFO
+      MemorySize: 512
+      Role: !GetAtt ApiFunctionRole.Arn
+      Runtime: nodejs24.x
+      Timeout: 10
+      Tracing: Active
+      Tags:
+        Project: dsa-daily
+        ManagedBy: CloudFormation
+
 Outputs:
   SiteBucketName:
     Description: S3 bucket that receives the Vite build output.
@@ -197,3 +427,15 @@ Outputs:
       - HasCustomDomain
       - !Sub "https://${AppDomainName}"
       - !Sub "https://${Distribution.DomainName}"
+  ApiUrl:
+    Description: Authenticated HTTP API base URL.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+  CognitoUserPoolId:
+    Description: Existing Cognito user pool used for authentication.
+    Value: !Ref ExistingUserPoolId
+  CognitoUserPoolClientId:
+    Description: Public SPA app client owned by this stack.
+    Value: !Ref SpaUserPoolClient
+  ProgressTableName:
+    Description: DynamoDB table that stores per-user progress and sessions.
+    Value: !Ref ProgressTable

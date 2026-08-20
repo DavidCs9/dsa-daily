@@ -1,0 +1,28 @@
+{
+  "name": "dsa-daily-api",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-lambda-powertools/event-handler": "^2.35.0",
+    "@aws-lambda-powertools/logger": "^2.35.0",
+    "@aws-lambda-powertools/tracer": "^2.35.0",
+    "@aws-sdk/client-dynamodb": "^3.1115.0",
+    "@aws-sdk/lib-dynamodb": "^3.1115.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.25.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "type": "module"
+}

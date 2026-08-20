@@ -33,6 +33,11 @@ Parameters:
     Type: String
     Default: Z09057602V6K42SQPOMLC
     AllowedPattern: "^Z[A-Z0-9]+$"
+  ExistingUserPoolId:
+    Type: String
+    Default: us-east-2_7LKDrgjB7
+    AllowedPattern: "^us-east-2_[A-Za-z0-9]+$"
+    Description: Existing Cognito user pool that receives the DSA SPA app client.
 
 Resources:
   AppCertificate:
@@ -77,6 +82,8 @@ Resources:
                   - cloudformation:DeleteChangeSet
                   - cloudformation:DescribeChangeSet
                   - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
                   - cloudformation:DescribeStacks
                   - cloudformation:ExecuteChangeSet
                   - cloudformation:GetTemplateSummary
@@ -153,6 +160,101 @@ Resources:
                   - acm:DescribeCertificate
                   - acm:ListTagsForCertificate
                 Resource: !Ref AppCertificate
+        - PolicyName: dsa-daily-serverless-release
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageApiExecutionRole
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRolePolicies
+                  - iam:ListRoleTags
+                  - iam:PassRole
+                  - iam:PutRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dsa-daily-api-us-east-2"
+              - Sid: ManageApiFunction
+                Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetPolicy
+                  - lambda:GetRuntimeManagementConfig
+                  - lambda:ListTags
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:PutRuntimeManagementConfig
+                Resource: !Sub "arn:${AWS::Partition}:lambda:us-east-2:${AWS::AccountId}:function:dsa-daily-api"
+              - Sid: ManageProgressTable
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:UpdateTable
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:us-east-2:${AWS::AccountId}:table/dsa-daily-progress"
+              - Sid: ManageDsaUserPoolClient
+                Effect: Allow
+                Action:
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DeleteUserPoolClient
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:us-east-2:${AWS::AccountId}:userpool/${ExistingUserPoolId}"
+              - Sid: ManageHttpApi
+                Effect: Allow
+                Action:
+                  - apigateway:DELETE
+                  - apigateway:GET
+                  - apigateway:PATCH
+                  - apigateway:POST
+                  - apigateway:PUT
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:apigateway:us-east-2::/apis*"
+                  - !Sub "arn:${AWS::Partition}:apigateway:us-east-2::/tags/*"
+              - Sid: ManageApplicationLogGroups
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DeleteRetentionPolicy
+                  - logs:ListTagsForResource
+                  - logs:PutRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:us-east-2:${AWS::AccountId}:log-group:/aws/lambda/dsa-daily-api:*"
+                  - !Sub "arn:${AWS::Partition}:logs:us-east-2:${AWS::AccountId}:log-group:/aws/api-gateway/dsa-daily:*"
+              - Sid: ReadAndConfigureLogDelivery
+                Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:DescribeLogGroups
+                  - logs:GetLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:UpdateLogDelivery
+                Resource: "*"
       Tags:
         - Key: Project
           Value: dsa-daily
