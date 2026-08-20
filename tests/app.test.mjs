@@ -41,6 +41,7 @@ test("uses private static hosting and an authenticated serverless persistence AP
   assert.match(template, /AWS::Serverless::Function/);
   assert.match(template, /AWS::Serverless::HttpApi/);
   assert.match(template, /AWS::DynamoDB::Table/);
+  assert.match(template, /DeletionPolicy: RetainExceptOnCreate/);
   assert.match(template, /us-east-2_7LKDrgjB7/);
   assert.match(handler, /@aws-lambda-powertools\/event-handler\/http/);
   assert.doesNotMatch(`${template}\n${handler}`, /POWERTOOLS_METRICS_NAMESPACE|@aws-lambda-powertools\/metrics/);

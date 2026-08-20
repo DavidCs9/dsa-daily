@@ -219,7 +219,7 @@ Resources:
 
   ProgressTable:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
+    DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-progress"
