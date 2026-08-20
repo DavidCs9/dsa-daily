@@ -260,8 +260,10 @@ Resources:
                   - logs:CreateLogDelivery
                   - logs:DeleteLogDelivery
                   - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
                   - logs:GetLogDelivery
                   - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
                   - logs:UpdateLogDelivery
                 Resource: "*"
       Tags:
