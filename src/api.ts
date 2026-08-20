@@ -7,6 +7,7 @@ export type HistoryEntry = {
   result: Result;
   heuristic: string;
   finishedAt: string;
+  durationSeconds?: number;
 };
 export type Progress = {
   index: number;
@@ -69,6 +70,7 @@ export function saveSession(input: {
   expectedVersion: number;
   result: Result;
   heuristic: string;
+  durationSeconds: number;
 }) {
   return request<{ progress: Progress; entry: HistoryEntry; idempotent: boolean }>("/v1/sessions", {
     method: "POST",
@@ -91,6 +93,7 @@ export async function createHistorySession(input: {
   result: Result;
   heuristic: string;
   finishedAt: string;
+  durationSeconds?: number;
 }) {
   const data = await request<{ progress: Progress; entry: HistoryEntry }>("/v1/sessions/manual", {
     method: "POST",
@@ -101,7 +104,7 @@ export async function createHistorySession(input: {
 
 export async function updateHistorySession(
   locator: Pick<HistoryEntry, "cycle" | "problemIndex">,
-  input: Pick<HistoryEntry, "result" | "heuristic" | "finishedAt"> & { expectedVersion: number },
+  input: Pick<HistoryEntry, "result" | "heuristic" | "finishedAt" | "durationSeconds"> & { expectedVersion: number },
 ) {
   const data = await request<{ progress: Progress }>(`/v1/sessions/${locator.cycle}/${locator.problemIndex}`, {
     method: "PATCH",

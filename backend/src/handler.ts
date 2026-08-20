@@ -76,6 +76,7 @@ function publicHistory(item: SessionItem): HistoryEntry {
     result: item.result,
     heuristic: item.heuristic,
     finishedAt: item.finishedAt,
+    ...(item.durationSeconds === undefined ? {} : { durationSeconds: item.durationSeconds }),
   };
 }
 
@@ -118,6 +119,7 @@ async function saveSession(pk: string, input: ReturnType<typeof parseSessionInpu
     result: input.result,
     heuristic: input.heuristic,
     finishedAt,
+    durationSeconds: input.durationSeconds,
   };
 
   try {
@@ -184,6 +186,7 @@ async function createManualSession(pk: string, input: ReturnType<typeof parseMan
     result: input.result,
     heuristic: input.heuristic,
     finishedAt: input.finishedAt,
+    durationSeconds: input.durationSeconds,
   };
 
   try {
@@ -239,6 +242,7 @@ async function updateSession(
 ) {
   const key = sessionKey(locator.cycle, locator.problemIndex);
   const now = new Date().toISOString();
+  const hasDuration = input.durationSeconds !== undefined;
   try {
     await documentClient.send(new TransactWriteCommand({
       TransactItems: [
@@ -247,17 +251,21 @@ async function updateSession(
             TableName: tableName,
             Key: { pk, sk: key },
             ConditionExpression: "attribute_exists(#pk)",
-            UpdateExpression: "SET #result = :result, #heuristic = :heuristic, #finishedAt = :finishedAt",
+            UpdateExpression: hasDuration
+              ? "SET #result = :result, #heuristic = :heuristic, #finishedAt = :finishedAt, #durationSeconds = :durationSeconds"
+              : "SET #result = :result, #heuristic = :heuristic, #finishedAt = :finishedAt REMOVE #durationSeconds",
             ExpressionAttributeNames: {
               "#pk": "pk",
               "#result": "result",
               "#heuristic": "heuristic",
               "#finishedAt": "finishedAt",
+              "#durationSeconds": "durationSeconds",
             },
             ExpressionAttributeValues: {
               ":result": input.result,
               ":heuristic": input.heuristic,
               ":finishedAt": input.finishedAt,
+              ...(hasDuration ? { ":durationSeconds": input.durationSeconds } : {}),
             },
           },
         },

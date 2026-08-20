@@ -30,12 +30,14 @@ test("validates a session write at the API boundary", () => {
     expectedVersion: 3,
     result: "hint",
     heuristic: "  Sliding window  ",
+    durationSeconds: 615,
   }), {
     expectedIndex: 3,
     expectedCycle: 1,
     expectedVersion: 3,
     result: "hint",
     heuristic: "Sliding window",
+    durationSeconds: 615,
   });
 
   assert.throws(
@@ -54,10 +56,12 @@ test("normalizes imported local history", () => {
       result: "solved",
       heuristic: "Set membership",
       finishedAt: "2026-08-20T12:00:00-06:00",
+      durationSeconds: 600,
     }],
   } });
 
   assert.equal(imported.history[0].finishedAt, "2026-08-20T18:00:00.000Z");
+  assert.equal(imported.history[0].durationSeconds, 600);
 });
 
 test("validates manual history CRUD inputs", () => {
@@ -69,6 +73,7 @@ test("validates manual history CRUD inputs", () => {
     result: "not-solved",
     heuristic: "  Revisit the invariant  ",
     finishedAt: "2026-08-20T14:00:00-06:00",
+    durationSeconds: 754,
   }), {
     problemIndex: 4,
     cycle: 3,
@@ -76,6 +81,7 @@ test("validates manual history CRUD inputs", () => {
     result: "not-solved",
     heuristic: "Revisit the invariant",
     finishedAt: "2026-08-20T20:00:00.000Z",
+    durationSeconds: 754,
   });
   assert.deepEqual(parseSessionUpdateInput({
     expectedVersion: 8,
@@ -89,6 +95,16 @@ test("validates manual history CRUD inputs", () => {
     finishedAt: "2026-08-20T20:00:00.000Z",
   });
   assert.deepEqual(parseDeleteSessionInput({ expectedVersion: 9 }), { expectedVersion: 9 });
+  assert.throws(
+    () => parseSessionUpdateInput({
+      expectedVersion: 8,
+      result: "solved",
+      heuristic: "",
+      finishedAt: "2026-08-20T20:00:00.000Z",
+      durationSeconds: 14_401,
+    }),
+    RequestError,
+  );
 });
 
 test("validates explicit next-problem repairs", () => {

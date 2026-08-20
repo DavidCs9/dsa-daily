@@ -1,5 +1,6 @@
 export const PROBLEM_COUNT = 150;
 export const MAX_HEURISTIC_LENGTH = 160;
+export const MAX_SESSION_DURATION_SECONDS = 14_400;
 export const IMPORTED_HISTORY_LIMIT = 90;
 
 export type SessionResult = "solved" | "hint" | "not-solved";
@@ -10,6 +11,7 @@ export type HistoryEntry = {
   result: SessionResult;
   heuristic: string;
   finishedAt: string;
+  durationSeconds?: number;
 };
 
 export type Progress = {
@@ -67,6 +69,13 @@ function expectedVersion(value: unknown) {
   return integer(value, "expectedVersion", 0, Number.MAX_SAFE_INTEGER);
 }
 
+function optionalDuration(value: unknown) {
+  if (value === undefined || value === null) return {};
+  return {
+    durationSeconds: integer(value, "durationSeconds", 0, MAX_SESSION_DURATION_SECONDS),
+  };
+}
+
 export function advance(index: number, cycle: number) {
   return index === PROBLEM_COUNT - 1
     ? { index: 0, cycle: cycle + 1 }
@@ -85,6 +94,7 @@ export function parseSessionInput(value: unknown) {
     expectedVersion: integer(value.expectedVersion, "expectedVersion", 0, Number.MAX_SAFE_INTEGER),
     result: result(value.result),
     heuristic: heuristic(value.heuristic),
+    ...optionalDuration(value.durationSeconds),
   };
 }
 
@@ -112,6 +122,7 @@ export function parseManualSessionInput(value: unknown) {
     result: result(value.result),
     heuristic: heuristic(value.heuristic),
     finishedAt: timestamp(value.finishedAt),
+    ...optionalDuration(value.durationSeconds),
   };
 }
 
@@ -122,6 +133,7 @@ export function parseSessionUpdateInput(value: unknown) {
     result: result(value.result),
     heuristic: heuristic(value.heuristic),
     finishedAt: timestamp(value.finishedAt),
+    ...optionalDuration(value.durationSeconds),
   };
 }
 
@@ -155,6 +167,7 @@ export function parseImportInput(value: unknown) {
       result: result(entry.result),
       heuristic: heuristic(entry.heuristic),
       finishedAt: timestamp(entry.finishedAt),
+      ...optionalDuration(entry.durationSeconds),
     };
   });
 

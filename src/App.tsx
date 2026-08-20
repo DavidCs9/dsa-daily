@@ -29,6 +29,19 @@ function formatTime(total: number) {
   return `${minutes}:${seconds}`;
 }
 
+function formatDuration(total: number | undefined) {
+  if (total === undefined) return "Time not recorded";
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+function durationMinutes(total: number | undefined) {
+  if (total === undefined) return "";
+  return Math.round((total / 60) * 10) / 10;
+}
+
 function todayKey(date = new Date()) {
   return date.toLocaleDateString("en-CA");
 }
@@ -255,6 +268,7 @@ function HistoryManager({
   const [newResult, setNewResult] = useState<Result>("solved");
   const [newHeuristic, setNewHeuristic] = useState("");
   const [newFinishedAt, setNewFinishedAt] = useState(dateTimeInputValue(new Date()));
+  const [newDurationMinutes, setNewDurationMinutes] = useState<number | "">("");
   const [editing, setEditing] = useState<HistoryEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -313,10 +327,12 @@ function HistoryManager({
       result: newResult,
       heuristic: newHeuristic.trim(),
       finishedAt: new Date(newFinishedAt).toISOString(),
+      durationSeconds: newDurationMinutes === "" ? undefined : Math.round(newDurationMinutes * 60),
     }));
     if (saved) {
       setNewHeuristic("");
       setNewFinishedAt(dateTimeInputValue(new Date()));
+      setNewDurationMinutes("");
     }
   }
 
@@ -328,6 +344,7 @@ function HistoryManager({
       result: editing.result,
       heuristic: editing.heuristic.trim(),
       finishedAt: new Date(editing.finishedAt).toISOString(),
+      durationSeconds: editing.durationSeconds,
     }));
     if (saved) setEditing(null);
   }
@@ -391,6 +408,9 @@ function HistoryManager({
             <label htmlFor="new-date">Finished at
               <input id="new-date" required type="datetime-local" value={newFinishedAt} onChange={(event) => setNewFinishedAt(event.target.value)} />
             </label>
+            <label htmlFor="new-duration">Focused minutes (optional)
+              <input id="new-duration" min="0" max="240" step="0.1" type="number" value={newDurationMinutes} onChange={(event) => setNewDurationMinutes(event.target.value === "" ? "" : Number(event.target.value))} placeholder="e.g. 10" />
+            </label>
             <label htmlFor="new-heuristic">Heuristic
               <input id="new-heuristic" maxLength={160} value={newHeuristic} onChange={(event) => setNewHeuristic(event.target.value)} placeholder="Optional one-line note" />
             </label>
@@ -425,6 +445,9 @@ function HistoryManager({
                           <label htmlFor={`edit-date-${key}`}>Finished at
                             <input id={`edit-date-${key}`} required type="datetime-local" value={dateTimeInputValue(editing.finishedAt)} onChange={(event) => setEditing({ ...editing, finishedAt: new Date(event.target.value).toISOString() })} />
                           </label>
+                          <label htmlFor={`edit-duration-${key}`}>Focused minutes
+                            <input id={`edit-duration-${key}`} min="0" max="240" step="0.1" type="number" value={durationMinutes(editing.durationSeconds)} onChange={(event) => setEditing({ ...editing, durationSeconds: event.target.value === "" ? undefined : Math.round(Number(event.target.value) * 60) })} placeholder="Not recorded" />
+                          </label>
                         </div>
                         <label htmlFor={`edit-heuristic-${key}`}>Heuristic
                           <input id={`edit-heuristic-${key}`} maxLength={160} value={editing.heuristic} onChange={(event) => setEditing({ ...editing, heuristic: event.target.value })} />
@@ -438,7 +461,10 @@ function HistoryManager({
                       <>
                         <div className="historyBody">
                           <strong>#{entry.problemIndex + 1} {title}</strong>
-                          <span>Cycle {entry.cycle} · {resultLabel(entry.result)} · {sessionDate(entry.finishedAt)}</span>
+                          <div className="sessionMeta">
+                            <span>Cycle {entry.cycle} · {resultLabel(entry.result)} · {sessionDate(entry.finishedAt)}</span>
+                            <strong className={entry.durationSeconds === undefined ? "timeSpent missingTime" : "timeSpent"}>Focused {formatDuration(entry.durationSeconds)}</strong>
+                          </div>
                           {entry.heuristic ? <p>{entry.heuristic}</p> : null}
                         </div>
                         <div className="itemActions">
@@ -481,6 +507,7 @@ function SessionView({
   const [justFinished, setJustFinished] = useState<HistoryEntry | null>(null);
   const [managing, setManaging] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef<number | null>(null);
 
   const completedThisCycle = progress.index;
   const completedToday = useMemo(
@@ -490,22 +517,28 @@ function SessionView({
   const activity = useMemo(() => summarizeActivity(progress.history), [progress.history]);
 
   useEffect(() => {
-    if (running) {
-      timerRef.current = setInterval(() => {
-        setSeconds((value) => {
-          if (value <= 1) {
-            setRunning(false);
-            setLogging(true);
-            return 0;
-          }
-          return value - 1;
-        });
-      }, 1000);
+    if (!running) return;
+    function tick() {
+      if (deadlineRef.current === null) return;
+      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setSeconds(remaining);
+      if (remaining === 0) {
+        deadlineRef.current = null;
+        setRunning(false);
+        setLogging(true);
+      }
     }
+    tick();
+    timerRef.current = setInterval(tick, 250);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [running]);
+
+  function currentRemainingSeconds() {
+    if (deadlineRef.current === null) return seconds;
+    return Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+  }
 
   function startSession() {
     window.open(problem.neetcode, "_blank", "noopener,noreferrer");
@@ -513,7 +546,38 @@ function SessionView({
     setActionError("");
     setStarted(true);
     setRunning(true);
-    setSeconds(sessionSeconds(problem.difficulty));
+    const allottedSeconds = sessionSeconds(problem.difficulty);
+    setSeconds(allottedSeconds);
+    deadlineRef.current = Date.now() + allottedSeconds * 1000;
+  }
+
+  function finishSession() {
+    const remaining = currentRemainingSeconds();
+    deadlineRef.current = null;
+    setSeconds(remaining);
+    setRunning(false);
+    setLogging(true);
+  }
+
+  function toggleTimer() {
+    if (running) {
+      const remaining = currentRemainingSeconds();
+      deadlineRef.current = null;
+      setSeconds(remaining);
+      setRunning(false);
+      return;
+    }
+    if (seconds > 0) {
+      deadlineRef.current = Date.now() + seconds * 1000;
+      setRunning(true);
+    }
+  }
+
+  function returnToTimer() {
+    if (seconds <= 0) return;
+    setLogging(false);
+    deadlineRef.current = Date.now() + seconds * 1000;
+    setRunning(true);
   }
 
   async function logResult() {
@@ -527,6 +591,7 @@ function SessionView({
         expectedVersion: progress.version,
         result,
         heuristic: heuristic.trim(),
+        durationSeconds: sessionSeconds(problem.difficulty) - seconds,
       });
       setProgress(saved.progress);
       cacheProgress(saved.progress);
@@ -536,6 +601,7 @@ function SessionView({
       setLogging(false);
       setResult(null);
       setHeuristic("");
+      deadlineRef.current = null;
       setSeconds(sessionSeconds(problems[saved.progress.index].difficulty));
     } catch (error) {
       if (error instanceof ApiError && error.code === "progress_conflict") {
@@ -543,6 +609,7 @@ function SessionView({
         if (current) {
           setProgress(current);
           cacheProgress(current);
+          deadlineRef.current = null;
           setSeconds(sessionSeconds(problems[current.index].difficulty));
         }
       }
@@ -632,8 +699,8 @@ function SessionView({
 
         {started && !logging ? (
           <div className="activeActions">
-            <button className="primary" onClick={() => setLogging(true)} type="button">Finish &amp; log result</button>
-            <button className="textButton" onClick={() => setRunning((value) => !value)} type="button">
+            <button className="primary" onClick={finishSession} type="button">Finish &amp; log result</button>
+            <button className="textButton" onClick={toggleTimer} type="button">
               {running ? "Pause timer" : "Resume timer"}
             </button>
             <div className="problemLinks">
@@ -654,7 +721,7 @@ function SessionView({
             <input id="heuristic" maxLength={160} value={heuristic} onChange={(event) => setHeuristic(event.target.value)} placeholder="e.g. Track what I’ve already seen with a set" />
             <div className="logActions">
               <button className="primary" disabled={!result || saving} onClick={() => void logResult()} type="button">{saving ? "Saving…" : "Save & advance"}</button>
-              {seconds > 0 ? <button className="textButton" disabled={saving} onClick={() => setLogging(false)} type="button">Back to timer</button> : null}
+              {seconds > 0 ? <button className="textButton" disabled={saving} onClick={returnToTimer} type="button">Back to timer</button> : null}
             </div>
           </div>
         ) : null}
