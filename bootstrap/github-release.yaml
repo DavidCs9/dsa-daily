@@ -56,6 +56,13 @@ Resources:
 
   GitHubReleaseRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          # API Gateway v2 returned these actions in a live AccessDenied before
+          # they appeared in cfn-lint's IAM action catalog.
+          ignore_checks:
+            - W3037
     Properties:
       Description: Deploys DSA Daily from the protected GitHub main branch.
       MaxSessionDuration: 3600
@@ -229,6 +236,8 @@ Resources:
                   - apigateway:PATCH
                   - apigateway:POST
                   - apigateway:PUT
+                  - apigateway:TagResource
+                  - apigateway:UntagResource
                 Resource:
                   - !Sub "arn:${AWS::Partition}:apigateway:us-east-2::/apis*"
                   - !Sub "arn:${AWS::Partition}:apigateway:us-east-2::/tags/*"
