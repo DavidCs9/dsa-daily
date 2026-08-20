@@ -26,6 +26,10 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(problems, /Reverse Integer/);
   assert.match(app, /Easy: 10, Medium: 20, Hard: 30/);
   assert.match(app, /Save & advance/);
+  assert.match(app, /Set next problem/);
+  assert.match(app, /Past sessions/);
+  assert.match(app, /completed/);
+  assert.match(app, /Next/);
 });
 
 test("uses private static hosting and an authenticated serverless persistence API", async () => {
@@ -44,6 +48,12 @@ test("uses private static hosting and an authenticated serverless persistence AP
   assert.match(template, /DeletionPolicy: RetainExceptOnCreate/);
   assert.match(template, /us-east-2_7LKDrgjB7/);
   assert.match(handler, /@aws-lambda-powertools\/event-handler\/http/);
+  assert.match(handler, /app\.patch\("\/v1\/progress"/);
+  assert.match(handler, /app\.post\("\/v1\/sessions\/manual"/);
+  assert.match(handler, /app\.patch\("\/v1\/sessions\/:cycle\/:problemIndex"/);
+  assert.match(handler, /app\.delete\("\/v1\/sessions\/:cycle\/:problemIndex"/);
+  assert.match(template, /Method: PATCH/);
+  assert.match(template, /Method: DELETE/);
   assert.doesNotMatch(`${template}\n${handler}`, /POWERTOOLS_METRICS_NAMESPACE|@aws-lambda-powertools\/metrics/);
 });
 

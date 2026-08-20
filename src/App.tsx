@@ -1,5 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { ApiError, apiConfigured, importLocalProgress, loadProgress, saveSession, undoSession, type HistoryEntry, type LocalProgress, type Progress, type Result } from "./api";
+import {
+  ApiError,
+  apiConfigured,
+  createHistorySession,
+  deleteHistorySession,
+  importLocalProgress,
+  loadProgress,
+  saveSession,
+  setNextProblem,
+  undoSession,
+  updateHistorySession,
+  type HistoryEntry,
+  type LocalProgress,
+  type Progress,
+  type Result,
+} from "./api";
 import { authConfigured, currentUser, login, logout, type AuthUser } from "./auth";
 import { problems } from "./problems";
 
@@ -19,6 +34,25 @@ function todayKey(date = new Date()) {
 
 function sessionSeconds(difficulty: keyof typeof SESSION_MINUTES) {
   return SESSION_MINUTES[difficulty] * 60;
+}
+
+function dateTimeInputValue(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function sessionDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function resultLabel(result: Result) {
+  if (result === "solved") return "Solved";
+  if (result === "hint") return "Needed hint";
+  return "Not solved";
 }
 
 function readLocalProgress(): LocalProgress {
@@ -139,6 +173,223 @@ function DailySession({ user, onSignedOut }: { user: AuthUser; onSignedOut: () =
   return <SessionView progress={progress} setProgress={setProgress} user={user} onSignedOut={onSignedOut} />;
 }
 
+function HistoryManager({
+  progress,
+  onProgress,
+  onClose,
+}: {
+  progress: Progress;
+  onProgress: (progress: Progress) => void;
+  onClose: () => void;
+}) {
+  const [nextProblem, setNextProblemNumber] = useState(progress.index + 1);
+  const [nextCycle, setNextCycle] = useState(progress.cycle);
+  const [newProblem, setNewProblem] = useState(progress.index + 1);
+  const [newCycle, setNewCycle] = useState(progress.cycle);
+  const [newResult, setNewResult] = useState<Result>("solved");
+  const [newHeuristic, setNewHeuristic] = useState("");
+  const [newFinishedAt, setNewFinishedAt] = useState(dateTimeInputValue(new Date()));
+  const [editing, setEditing] = useState<HistoryEntry | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const history = useMemo(
+    () => [...progress.history].sort((left, right) => right.finishedAt.localeCompare(left.finishedAt)),
+    [progress.history],
+  );
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onClose]);
+
+  function acceptProgress(value: Progress) {
+    cacheProgress(value);
+    onProgress(value);
+  }
+
+  async function runMutation(action: () => Promise<Progress>) {
+    setBusy(true);
+    setError("");
+    try {
+      acceptProgress(await action());
+      return true;
+    } catch (mutationError) {
+      if (mutationError instanceof ApiError && mutationError.code === "progress_conflict") {
+        const current = await loadProgress().catch(() => null);
+        if (current) acceptProgress(current);
+      }
+      setError(messageFrom(mutationError));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function repairIndex(event: FormEvent) {
+    event.preventDefault();
+    if (!window.confirm(`Set the next problem to ${nextProblem} in cycle ${nextCycle}? Session history will stay unchanged.`)) return;
+    await runMutation(() => setNextProblem({
+      index: nextProblem - 1,
+      cycle: nextCycle,
+      expectedVersion: progress.version,
+    }));
+  }
+
+  async function addSession(event: FormEvent) {
+    event.preventDefault();
+    const saved = await runMutation(() => createHistorySession({
+      problemIndex: newProblem - 1,
+      cycle: newCycle,
+      expectedVersion: progress.version,
+      result: newResult,
+      heuristic: newHeuristic.trim(),
+      finishedAt: new Date(newFinishedAt).toISOString(),
+    }));
+    if (saved) {
+      setNewHeuristic("");
+      setNewFinishedAt(dateTimeInputValue(new Date()));
+    }
+  }
+
+  async function saveEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    const saved = await runMutation(() => updateHistorySession(editing, {
+      expectedVersion: progress.version,
+      result: editing.result,
+      heuristic: editing.heuristic.trim(),
+      finishedAt: new Date(editing.finishedAt).toISOString(),
+    }));
+    if (saved) setEditing(null);
+  }
+
+  async function removeSession(entry: HistoryEntry) {
+    const title = problems[entry.problemIndex]?.title ?? `Problem ${entry.problemIndex + 1}`;
+    if (!window.confirm(`Delete the cycle ${entry.cycle} record for ${title}? The next-problem index will not move.`)) return;
+    await runMutation(() => deleteHistorySession(entry, progress.version));
+  }
+
+  return (
+    <div className="managerOverlay" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onClose();
+    }}>
+      <section className="managerDialog" role="dialog" aria-modal="true" aria-labelledby="manager-title">
+        <header className="managerHeader">
+          <div>
+            <p className="eyebrow"><span>History &amp; repair</span></p>
+            <h2 id="manager-title">Manage progress</h2>
+          </div>
+          <button className="closeButton" disabled={busy} onClick={onClose} type="button" aria-label="Close history">Close</button>
+        </header>
+
+        {error ? <p className="errorNote managerError" role="alert">{error}</p> : null}
+
+        <section className="repairPanel" aria-labelledby="repair-title">
+          <div>
+            <h3 id="repair-title">Set next problem</h3>
+            <p>Moves the pointer only. Existing sessions are not changed.</p>
+          </div>
+          <form className="compactForm" onSubmit={(event) => void repairIndex(event)}>
+            <label htmlFor="next-problem">Problem</label>
+            <input id="next-problem" min="1" max={problems.length} required type="number" value={nextProblem} onChange={(event) => setNextProblemNumber(Number(event.target.value))} />
+            <label htmlFor="next-cycle">Cycle</label>
+            <input id="next-cycle" min="1" required type="number" value={nextCycle} onChange={(event) => setNextCycle(Number(event.target.value))} />
+            <button className="secondaryButton" disabled={busy} type="submit">Set next</button>
+          </form>
+        </section>
+
+        <details className="addSessionPanel">
+          <summary>Add a missing session</summary>
+          <p className="managerHelp">Adds one history record without moving the next-problem pointer.</p>
+          <form className="managerForm" onSubmit={(event) => void addSession(event)}>
+            <div className="formRow">
+              <label htmlFor="new-problem">Problem
+                <input id="new-problem" min="1" max={problems.length} required type="number" value={newProblem} onChange={(event) => setNewProblem(Number(event.target.value))} />
+              </label>
+              <label htmlFor="new-cycle">Cycle
+                <input id="new-cycle" min="1" required type="number" value={newCycle} onChange={(event) => setNewCycle(Number(event.target.value))} />
+              </label>
+              <label htmlFor="new-result">Result
+                <select id="new-result" value={newResult} onChange={(event) => setNewResult(event.target.value as Result)}>
+                  <option value="solved">Solved</option>
+                  <option value="hint">Needed hint</option>
+                  <option value="not-solved">Not solved</option>
+                </select>
+              </label>
+            </div>
+            <label htmlFor="new-date">Finished at
+              <input id="new-date" required type="datetime-local" value={newFinishedAt} onChange={(event) => setNewFinishedAt(event.target.value)} />
+            </label>
+            <label htmlFor="new-heuristic">Heuristic
+              <input id="new-heuristic" maxLength={160} value={newHeuristic} onChange={(event) => setNewHeuristic(event.target.value)} placeholder="Optional one-line note" />
+            </label>
+            <button className="secondaryButton" disabled={busy} type="submit">Add session</button>
+          </form>
+        </details>
+
+        <section className="historySection" aria-labelledby="history-title">
+          <div className="historyHeading">
+            <h3 id="history-title">Past sessions</h3>
+            <span>{progress.totalSessions} total</span>
+          </div>
+          {history.length === 0 ? <p className="emptyHistory">No sessions recorded yet.</p> : (
+            <div className="historyList">
+              {history.map((entry) => {
+                const key = `${entry.cycle}:${entry.problemIndex}`;
+                const isEditing = editing?.cycle === entry.cycle && editing.problemIndex === entry.problemIndex;
+                const title = problems[entry.problemIndex]?.title ?? `Problem ${entry.problemIndex + 1}`;
+                return (
+                  <article className="historyItem" key={key}>
+                    {isEditing && editing ? (
+                      <form className="managerForm editForm" onSubmit={(event) => void saveEdit(event)}>
+                        <strong>Cycle {entry.cycle} · #{entry.problemIndex + 1} {title}</strong>
+                        <div className="formRow editRow">
+                          <label htmlFor={`edit-result-${key}`}>Result
+                            <select id={`edit-result-${key}`} value={editing.result} onChange={(event) => setEditing({ ...editing, result: event.target.value as Result })}>
+                              <option value="solved">Solved</option>
+                              <option value="hint">Needed hint</option>
+                              <option value="not-solved">Not solved</option>
+                            </select>
+                          </label>
+                          <label htmlFor={`edit-date-${key}`}>Finished at
+                            <input id={`edit-date-${key}`} required type="datetime-local" value={dateTimeInputValue(editing.finishedAt)} onChange={(event) => setEditing({ ...editing, finishedAt: new Date(event.target.value).toISOString() })} />
+                          </label>
+                        </div>
+                        <label htmlFor={`edit-heuristic-${key}`}>Heuristic
+                          <input id={`edit-heuristic-${key}`} maxLength={160} value={editing.heuristic} onChange={(event) => setEditing({ ...editing, heuristic: event.target.value })} />
+                        </label>
+                        <div className="itemActions">
+                          <button className="secondaryButton" disabled={busy} type="submit">Save</button>
+                          <button className="textButton" disabled={busy} onClick={() => setEditing(null)} type="button">Cancel</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="historyBody">
+                          <strong>#{entry.problemIndex + 1} {title}</strong>
+                          <span>Cycle {entry.cycle} · {resultLabel(entry.result)} · {sessionDate(entry.finishedAt)}</span>
+                          {entry.heuristic ? <p>{entry.heuristic}</p> : null}
+                        </div>
+                        <div className="itemActions">
+                          <button className="textButton" disabled={busy} onClick={() => setEditing(entry)} type="button">Edit</button>
+                          <button className="dangerButton" disabled={busy} onClick={() => void removeSession(entry)} type="button">Delete</button>
+                        </div>
+                      </>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </section>
+    </div>
+  );
+}
+
 function SessionView({
   progress,
   setProgress,
@@ -160,6 +411,7 @@ function SessionView({
   const [heuristic, setHeuristic] = useState("");
   const [actionError, setActionError] = useState("");
   const [justFinished, setJustFinished] = useState<HistoryEntry | null>(null);
+  const [managing, setManaging] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const completedThisCycle = progress.index;
@@ -256,11 +508,12 @@ function SessionView({
           <span>DSA Daily</span>
         </a>
         <div className="headerRight">
-          <div className="headerProgress" aria-label={`Cycle ${progress.cycle}, ${completedThisCycle} of 150 complete`}>
+          <div className="headerProgress" aria-label={`Cycle ${progress.cycle}, ${completedThisCycle} problems completed, next problem ${progress.index + 1}`}>
             <span>Cycle {progress.cycle}</span>
             <div className="progressTrack"><span style={{ width: `${(completedThisCycle / 150) * 100}%` }} /></div>
-            <span>{completedThisCycle}/150</span>
+            <span>{completedThisCycle} completed</span>
           </div>
+          <button className="accountButton" onClick={() => setManaging(true)} type="button">History</button>
           <button className="accountButton" onClick={onSignedOut} title={`Signed in as ${user.signInDetails?.loginId ?? user.username}`} type="button">Sign out</button>
         </div>
       </header>
@@ -278,7 +531,7 @@ function SessionView({
 
         {actionError ? <p className="errorNote actionError" role="alert">{actionError}</p> : null}
         <p className="eyebrow">
-          <span>{completedToday === 0 ? "Today" : `${completedToday} done today`}</span> · Problem {progress.index + 1} of 150
+          <span>{completedToday === 0 ? "Next" : `${completedToday} done today · Next`}</span> · Problem {progress.index + 1} of 150
         </p>
         <h1>{problem.title}</h1>
         <div className="meta">
@@ -338,6 +591,7 @@ function SessionView({
         <span>One problem. Clean execution. Come back tomorrow.</span>
         {progress.totalSessions > 0 ? <span>{progress.totalSessions} total sessions synced</span> : null}
       </footer>
+      {managing ? <HistoryManager progress={progress} onProgress={setProgress} onClose={() => setManaging(false)} /> : null}
     </main>
   );
 }
