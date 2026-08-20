@@ -31,7 +31,7 @@ if (!outputs.SiteBucketName || !outputs.DistributionId) {
 
 run("aws", [
   "s3", "sync", "dist", `s3://${outputs.SiteBucketName}`,
-  "--delete", "--exclude", "index.html",
+  "--delete", "--exclude", "index.html", "--exclude", "artifacts/*",
   "--cache-control", "public,max-age=31536000,immutable",
   "--region", region,
 ]);

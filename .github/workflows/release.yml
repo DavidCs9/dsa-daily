@@ -48,14 +48,25 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: Test and build
+      - name: Install API dependencies
+        run: npm ci --prefix backend
+
+      - name: Test and build frontend
         run: npm test
 
-      - name: Lint
+      - name: Check API
+        run: |
+          npm run build --prefix backend
+          npm test --prefix backend
+
+      - name: Lint application
         run: npm run lint
 
       - name: Set up AWS SAM
@@ -66,8 +77,10 @@ jobs:
 
       - name: Validate infrastructure
         run: |
+          export PATH="$PWD/backend/node_modules/.bin:$PATH"
           npm run infra:validate
-          sam validate --template-file bootstrap/github-release.yaml --region us-east-1
+          sam validate --lint --template-file bootstrap/github-release.yaml --region us-east-1
+          sam build --template-file template.yaml
 
   deploy:
     if: >-
@@ -104,12 +117,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Install API dependencies
+        if: needs.changes.outputs.infrastructure == 'true'
+        run: |
+          npm ci --prefix backend
+          echo "$PWD/backend/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Configure short-lived AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.2.3
@@ -118,19 +137,59 @@ jobs:
           role-session-name: dsa-daily-release
           aws-region: us-east-2
 
+      - name: Set up AWS SAM
+        if: needs.changes.outputs.infrastructure == 'true'
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Deploy infrastructure
         if: needs.changes.outputs.infrastructure == 'true'
-        run: >-
-          aws cloudformation deploy
-          --template-file template.yaml
-          --stack-name dsa-daily
-          --region us-east-2
-          --no-fail-on-empty-changeset
-          --parameter-overrides
-          EnableCustomDomain=true
-          AppDomainName=${{ vars.APP_DOMAIN_NAME }}
-          CertificateArn=${{ vars.APP_CERTIFICATE_ARN }}
-          HostedZoneId=${{ vars.HOSTED_ZONE_ID }}
+        env:
+          APP_CERTIFICATE_ARN: ${{ vars.APP_CERTIFICATE_ARN }}
+          APP_DOMAIN_NAME: ${{ vars.APP_DOMAIN_NAME }}
+          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+        run: |
+          aws_account_id="$(aws sts get-caller-identity --query Account --output text)"
+          sam build --template-file template.yaml
+          sam package \
+            --template-file .aws-sam/build/template.yaml \
+            --s3-bucket "dsa-daily-${aws_account_id}-us-east-2" \
+            --s3-prefix artifacts \
+            --output-template-file packaged.yaml \
+            --region us-east-2
+          aws cloudformation deploy \
+            --template-file packaged.yaml \
+            --stack-name dsa-daily \
+            --region us-east-2 \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              EnableCustomDomain=true \
+              AppDomainName="$APP_DOMAIN_NAME" \
+              CertificateArn="$APP_CERTIFICATE_ARN" \
+              HostedZoneId="$HOSTED_ZONE_ID" \
+              WebOrigin="https://$APP_DOMAIN_NAME" \
+              ExistingUserPoolId=us-east-2_7LKDrgjB7
+
+      - name: Load deployed application configuration
+        run: |
+          api_url="$(aws cloudformation describe-stacks --stack-name dsa-daily --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue | [0]" --output text)"
+          user_pool_id="$(aws cloudformation describe-stacks --stack-name dsa-daily --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue | [0]" --output text)"
+          user_pool_client_id="$(aws cloudformation describe-stacks --stack-name dsa-daily --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolClientId'].OutputValue | [0]" --output text)"
+          for value in "$api_url" "$user_pool_id" "$user_pool_client_id"; do
+            if [[ -z "$value" || "$value" == "None" ]]; then
+              echo "The application stack is missing an auth or API output." >&2
+              exit 1
+            fi
+          done
+          echo "VITE_API_URL=$api_url" >> "$GITHUB_ENV"
+          echo "VITE_COGNITO_USER_POOL_ID=$user_pool_id" >> "$GITHUB_ENV"
+          echo "VITE_COGNITO_USER_POOL_CLIENT_ID=$user_pool_client_id" >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Publish static files
         run: npm run publish

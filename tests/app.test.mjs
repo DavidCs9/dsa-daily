@@ -25,17 +25,25 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(problems, /Contains Duplicate/);
   assert.match(problems, /Reverse Integer/);
   assert.match(app, /Easy: 10, Medium: 20, Hard: 30/);
-  assert.match(app, /Save &amp; advance/);
+  assert.match(app, /Save & advance/);
 });
 
-test("uses private S3 and CloudFront without application compute", async () => {
-  const template = await readFile(new URL("../template.yaml", import.meta.url), "utf8");
+test("uses private static hosting and an authenticated serverless persistence API", async () => {
+  const [template, handler] = await Promise.all([
+    readFile(new URL("../template.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/handler.ts", import.meta.url), "utf8"),
+  ]);
 
   assert.match(template, /AWS::S3::Bucket/);
   assert.match(template, /AWS::CloudFront::Distribution/);
   assert.match(template, /AWS::CloudFront::OriginAccessControl/);
   assert.match(template, /BlockPublicAcls: true/);
-  assert.doesNotMatch(template, /AWS::Serverless::Function|AWS::Lambda::Function/);
+  assert.match(template, /AWS::Serverless::Function/);
+  assert.match(template, /AWS::Serverless::HttpApi/);
+  assert.match(template, /AWS::DynamoDB::Table/);
+  assert.match(template, /us-east-2_7LKDrgjB7/);
+  assert.match(handler, /@aws-lambda-powertools\/event-handler\/http/);
+  assert.doesNotMatch(`${template}\n${handler}`, /POWERTOOLS_METRICS_NAMESPACE|@aws-lambda-powertools\/metrics/);
 });
 
 test("deploys to AWS only for frontend or application infrastructure changes", () => {

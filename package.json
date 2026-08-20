@@ -11,12 +11,13 @@
     "preview": "vite preview --port 3000",
     "test": "npm run build && node --test tests/app.test.mjs",
     "lint": "eslint .",
-    "infra:validate": "sam validate --region us-east-2",
+    "infra:validate": "sam validate --lint --region us-east-2",
     "infra:deploy": "sam deploy",
     "publish": "node scripts/publish.mjs",
     "deploy": "npm run build && npm run infra:deploy && npm run publish"
   },
   "dependencies": {
+    "aws-amplify": "^6.20.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
