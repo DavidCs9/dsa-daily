@@ -89,7 +89,7 @@ Resources:
                 Action:
                   - s3:CreateBucket
                   - s3:DeleteBucket
-                  - s3:GetBucketEncryption
+                  - s3:GetEncryptionConfiguration
                   - s3:GetBucketLocation
                   - s3:GetBucketOwnershipControls
                   - s3:GetBucketPolicy
@@ -97,7 +97,7 @@ Resources:
                   - s3:GetBucketTagging
                   - s3:GetBucketVersioning
                   - s3:ListBucket
-                  - s3:PutBucketEncryption
+                  - s3:PutEncryptionConfiguration
                   - s3:PutBucketOwnershipControls
                   - s3:PutBucketPolicy
                   - s3:PutBucketPublicAccessBlock
