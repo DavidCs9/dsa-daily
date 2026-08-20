@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ApiError,
   apiConfigured,
@@ -271,18 +271,30 @@ function HistoryManager({
   const [editing, setEditing] = useState<HistoryEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [closing, setClosing] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const history = useMemo(
     () => [...progress.history].sort((left, right) => right.finishedAt.localeCompare(left.finishedAt)),
     [progress.history],
   );
 
+  const requestClose = useCallback(() => {
+    if (busy || closing) return;
+    setClosing(true);
+    closeTimerRef.current = setTimeout(onClose, 180);
+  }, [busy, closing, onClose]);
+
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape") requestClose();
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [busy, onClose]);
+  }, [requestClose]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
 
   function acceptProgress(value: Progress) {
     cacheProgress(value);
@@ -355,8 +367,8 @@ function HistoryManager({
   }
 
   return (
-    <div className="managerOverlay" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !busy) onClose();
+    <div className={`managerOverlay ${closing ? "closing" : ""}`} role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) requestClose();
     }}>
       <section className="managerDialog" role="dialog" aria-modal="true" aria-labelledby="manager-title">
         <header className="managerHeader">
@@ -364,7 +376,7 @@ function HistoryManager({
             <p className="eyebrow"><span>History, streak &amp; repair</span></p>
             <h2 id="manager-title">Manage progress</h2>
           </div>
-          <button className="closeButton" disabled={busy} onClick={onClose} type="button" aria-label="Close history">Close</button>
+          <button className="closeButton" disabled={busy || closing} onClick={requestClose} type="button" aria-label="Close history">Close</button>
         </header>
 
         {error ? <p className="errorNote managerError" role="alert">{error}</p> : null}
