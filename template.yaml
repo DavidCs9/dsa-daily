@@ -73,6 +73,8 @@ Resources:
         ParametersInCacheKeyAndForwardedToOrigin:
           CookiesConfig:
             CookieBehavior: none
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
           HeadersConfig:
             HeaderBehavior: none
           QueryStringsConfig:
