@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
+import { classifyChanges } from "../scripts/classify-changes.mjs";
 
 test("builds a standalone Vite application", async () => {
   const [html, assets] = await Promise.all([
@@ -35,4 +36,34 @@ test("uses private S3 and CloudFront without application compute", async () => {
   assert.match(template, /AWS::CloudFront::OriginAccessControl/);
   assert.match(template, /BlockPublicAcls: true/);
   assert.doesNotMatch(template, /AWS::Serverless::Function|AWS::Lambda::Function/);
+});
+
+test("deploys to AWS only for frontend or application infrastructure changes", () => {
+  assert.deepEqual(classifyChanges(["README.md", "tests/app.test.mjs"]), {
+    bootstrap: false,
+    deploy: false,
+    frontend: false,
+    infrastructure: false,
+  });
+
+  assert.deepEqual(classifyChanges(["src/App.tsx"]), {
+    bootstrap: false,
+    deploy: true,
+    frontend: true,
+    infrastructure: false,
+  });
+
+  assert.deepEqual(classifyChanges(["template.yaml"]), {
+    bootstrap: false,
+    deploy: true,
+    frontend: false,
+    infrastructure: true,
+  });
+
+  assert.deepEqual(classifyChanges(["bootstrap/github-release.yaml"]), {
+    bootstrap: true,
+    deploy: false,
+    frontend: false,
+    infrastructure: false,
+  });
 });

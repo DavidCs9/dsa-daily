@@ -10,7 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      bootstrap: ${{ steps.classify.outputs.bootstrap }}
+      deploy: ${{ steps.classify.outputs.deploy }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      infrastructure: ${{ steps.classify.outputs.infrastructure }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            BASE_SHA="$(git hash-object -t tree /dev/null)"
+          fi
+
+          mapfile -t changed_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          node scripts/classify-changes.mjs "${changed_files[@]}"
+
   quality:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -38,16 +65,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate infrastructure
-        run: npm run infra:validate
+        run: |
+          npm run infra:validate
+          sam validate --template-file bootstrap/github-release.yaml --region us-east-1
 
   deploy:
     if: >-
       github.event_name == 'push' &&
-      vars.AWS_DEPLOY_ROLE_ARN != '' &&
-      vars.APP_CERTIFICATE_ARN != '' &&
-      vars.APP_DOMAIN_NAME != '' &&
-      vars.HOSTED_ZONE_ID != ''
-    needs: quality
+      needs.changes.outputs.deploy == 'true'
+    needs: [changes, quality]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,6 +84,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Verify deployment configuration
+        env:
+          APP_CERTIFICATE_ARN: ${{ vars.APP_CERTIFICATE_ARN }}
+          APP_DOMAIN_NAME: ${{ vars.APP_DOMAIN_NAME }}
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+        run: |
+          for name in AWS_DEPLOY_ROLE_ARN APP_CERTIFICATE_ARN APP_DOMAIN_NAME HOSTED_ZONE_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required repository variable: $name" >&2
+              exit 1
+            fi
+          done
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -79,6 +119,7 @@ jobs:
           aws-region: us-east-2
 
       - name: Deploy infrastructure
+        if: needs.changes.outputs.infrastructure == 'true'
         run: >-
           aws cloudformation deploy
           --template-file template.yaml
