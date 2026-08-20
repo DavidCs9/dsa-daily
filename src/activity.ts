@@ -1,4 +1,4 @@
-import type { HistoryEntry } from "./api";
+export type ActivityEntry = { finishedAt: string };
 
 export type ActivitySummary = {
   byDay: Map<string, number>;
@@ -33,7 +33,7 @@ function ordinal(key: string) {
   return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
 }
 
-export function summarizeActivity(history: HistoryEntry[], now = new Date()): ActivitySummary {
+export function summarizeActivity(history: ActivityEntry[], now = new Date()): ActivitySummary {
   const byDay = new Map<string, number>();
   for (const entry of history) {
     const date = new Date(entry.finishedAt);

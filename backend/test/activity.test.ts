@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calendarDays, dayKey, summarizeActivity } from "../../src/activity.js";
-import type { HistoryEntry } from "../../src/api.js";
+import { calendarDays, dayKey, summarizeActivity, type ActivityEntry } from "../../src/activity.js";
 
-function entry(year: number, month: number, day: number, problemIndex: number): HistoryEntry {
+function entry(year: number, month: number, day: number, problemIndex: number): ActivityEntry & { problemIndex: number } {
   return {
     problemIndex,
-    cycle: 1,
-    result: "solved",
-    heuristic: "",
     finishedAt: new Date(year, month, day, 12).toISOString(),
   };
 }
