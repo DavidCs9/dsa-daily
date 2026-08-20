@@ -16,6 +16,7 @@ import {
   type Result,
 } from "./api";
 import { authConfigured, currentUser, login, logout, type AuthUser } from "./auth";
+import { calendarDays, summarizeActivity } from "./activity";
 import { problems } from "./problems";
 
 const STORAGE_KEY = "dsa-daily:v1";
@@ -173,6 +174,71 @@ function DailySession({ user, onSignedOut }: { user: AuthUser; onSignedOut: () =
   return <SessionView progress={progress} setProgress={setProgress} user={user} onSignedOut={onSignedOut} />;
 }
 
+function ActivityCalendar({ history }: { history: HistoryEntry[] }) {
+  const now = new Date();
+  const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [month, setMonth] = useState(currentMonth);
+  const activity = useMemo(() => summarizeActivity(history), [history]);
+  const days = useMemo(() => calendarDays(month, activity.byDay), [activity.byDay, month]);
+  const sessionsThisMonth = days
+    .filter((day) => day.inMonth)
+    .reduce((total, day) => total + day.sessions, 0);
+  const isCurrentMonth = month.getFullYear() === currentMonth.getFullYear() && month.getMonth() === currentMonth.getMonth();
+
+  function moveMonth(offset: number) {
+    setMonth((value) => new Date(value.getFullYear(), value.getMonth() + offset, 1));
+  }
+
+  return (
+    <section className="activityPanel" aria-labelledby="activity-title">
+      <div className="streakStats">
+        <div className="primaryStreak">
+          <span>Current streak</span>
+          <strong>{activity.currentStreak}</strong>
+          <small>{activity.currentStreak === 1 ? "day" : "days"}</small>
+        </div>
+        <div><span>Best streak</span><strong>{activity.bestStreak}</strong><small>days</small></div>
+        <div><span>Active days</span><strong>{activity.activeDays}</strong><small>total</small></div>
+        <div><span>This month</span><strong>{sessionsThisMonth}</strong><small>sessions</small></div>
+      </div>
+
+      <div className="calendarHeader">
+        <div>
+          <p className="calendarKicker">Activity calendar</p>
+          <h3 id="activity-title">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h3>
+        </div>
+        <div className="calendarNav" aria-label="Change calendar month">
+          <button onClick={() => moveMonth(-1)} type="button" aria-label="Previous month">Previous</button>
+          <button disabled={isCurrentMonth} onClick={() => moveMonth(1)} type="button" aria-label="Next month">Next</button>
+        </div>
+      </div>
+
+      <div className="calendarWeekdays" aria-hidden="true">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}
+      </div>
+      <div className="calendarGrid" role="grid" aria-label={`DSA activity for ${month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}`}>
+        {days.map((day) => {
+          const label = `${day.date.toLocaleDateString(undefined, { dateStyle: "long" })}: ${day.sessions} ${day.sessions === 1 ? "session" : "sessions"}`;
+          const intensity = day.sessions >= 3 ? "intensityThree" : day.sessions === 2 ? "intensityTwo" : day.sessions === 1 ? "intensityOne" : "";
+          return (
+            <div
+              className={`calendarDay ${day.inMonth ? "" : "outsideMonth"} ${day.isToday ? "today" : ""} ${intensity}`}
+              key={day.key}
+              role="gridcell"
+              aria-label={label}
+              title={label}
+            >
+              <time dateTime={day.key}>{day.dayNumber}</time>
+              {day.sessions > 0 ? <span className="sessionMark">{day.sessions > 1 ? day.sessions : ""}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+      <p className="calendarNote">A day counts toward the streak when at least one session is logged. Today or yesterday can anchor the current streak.</p>
+    </section>
+  );
+}
+
 function HistoryManager({
   progress,
   onProgress,
@@ -279,13 +345,15 @@ function HistoryManager({
       <section className="managerDialog" role="dialog" aria-modal="true" aria-labelledby="manager-title">
         <header className="managerHeader">
           <div>
-            <p className="eyebrow"><span>History &amp; repair</span></p>
+            <p className="eyebrow"><span>History, streak &amp; repair</span></p>
             <h2 id="manager-title">Manage progress</h2>
           </div>
           <button className="closeButton" disabled={busy} onClick={onClose} type="button" aria-label="Close history">Close</button>
         </header>
 
         {error ? <p className="errorNote managerError" role="alert">{error}</p> : null}
+
+        <ActivityCalendar history={progress.history} />
 
         <section className="repairPanel" aria-labelledby="repair-title">
           <div>
@@ -419,6 +487,7 @@ function SessionView({
     () => progress.history.filter((entry) => todayKey(new Date(entry.finishedAt)) === todayKey()).length,
     [progress.history],
   );
+  const activity = useMemo(() => summarizeActivity(progress.history), [progress.history]);
 
   useEffect(() => {
     if (running) {
@@ -513,6 +582,10 @@ function SessionView({
             <div className="progressTrack"><span style={{ width: `${(completedThisCycle / 150) * 100}%` }} /></div>
             <span>{completedThisCycle} completed</span>
           </div>
+          <button className="streakButton" onClick={() => setManaging(true)} type="button" aria-label={`Current streak: ${activity.currentStreak} days. Open activity calendar.`}>
+            <span className="streakDot" />
+            <span><strong>{activity.currentStreak}</strong> day{activity.currentStreak === 1 ? "" : "s"} streak</span>
+          </button>
           <button className="accountButton" onClick={() => setManaging(true)} type="button">History</button>
           <button className="accountButton" onClick={onSignedOut} title={`Signed in as ${user.signInDetails?.loginId ?? user.username}`} type="button">Sign out</button>
         </div>
