@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: GitHub OIDC release role and CloudFront certificate for DSA Daily
+
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    Description: ARN of the existing GitHub Actions OIDC provider in this AWS account.
+  GitHubOwner:
+    Type: String
+    Default: DavidCs9
+    AllowedPattern: "^[A-Za-z0-9-]+$"
+  GitHubOwnerId:
+    Type: String
+    Default: "105255351"
+    AllowedPattern: "^[0-9]+$"
+  GitHubRepository:
+    Type: String
+    Default: dsa-daily
+    AllowedPattern: "^[A-Za-z0-9_.-]+$"
+  GitHubRepositoryId:
+    Type: String
+    Default: "1341045875"
+    AllowedPattern: "^[0-9]+$"
+  GitHubBranch:
+    Type: String
+    Default: main
+    AllowedPattern: "^[A-Za-z0-9_./-]+$"
+  AppDomainName:
+    Type: String
+    Default: dsa.castrodavid.dev
+    AllowedPattern: "^[a-z0-9.-]+$"
+  HostedZoneId:
+    Type: String
+    Default: Z09057602V6K42SQPOMLC
+    AllowedPattern: "^Z[A-Z0-9]+$"
+
+Resources:
+  AppCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref AppDomainName
+      DomainValidationOptions:
+        - DomainName: !Ref AppDomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+      ValidationMethod: DNS
+
+  GitHubReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Deploys DSA Daily from the protected GitHub main branch.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:ref:refs/heads/${GitHubBranch}"
+      Policies:
+        - PolicyName: dsa-daily-release
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DeployApplicationStack
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListChangeSets
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:us-east-2:${AWS::AccountId}:stack/dsa-daily/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:us-east-2:aws:transform/Serverless-2016-10-31"
+              - Sid: ManageApplicationBucket
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:GetBucketEncryption
+                  - s3:GetBucketLocation
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketTagging
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                  - s3:PutBucketEncryption
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketTagging
+                  - s3:PutBucketVersioning
+                Resource: !Sub "arn:${AWS::Partition}:s3:::dsa-daily-${AWS::AccountId}-us-east-2"
+              - Sid: PublishApplicationAssets
+                Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::dsa-daily-${AWS::AccountId}-us-east-2/*"
+              - Sid: ManageCloudFrontResources
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateCachePolicy
+                  - cloudfront:CreateDistribution
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:CreateOriginAccessControl
+                  - cloudfront:DeleteCachePolicy
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:DeleteOriginAccessControl
+                  - cloudfront:GetCachePolicy
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:GetOriginAccessControl
+                  - cloudfront:ListCachePolicies
+                  - cloudfront:ListDistributions
+                  - cloudfront:ListOriginAccessControls
+                  - cloudfront:ListTagsForResource
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                  - cloudfront:UpdateCachePolicy
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:UpdateOriginAccessControl
+                Resource: "*"
+              - Sid: ManageApplicationDns
+                Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:GetChange
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:route53:::hostedzone/${HostedZoneId}"
+                  - !Sub "arn:${AWS::Partition}:route53:::change/*"
+              - Sid: ReadApplicationCertificate
+                Effect: Allow
+                Action:
+                  - acm:DescribeCertificate
+                  - acm:ListTagsForCertificate
+                Resource: !Ref AppCertificate
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  CertificateArn:
+    Description: us-east-1 ACM certificate used by CloudFront.
+    Value: !Ref AppCertificate
+  GitHubReleaseRoleArn:
+    Description: Role ARN stored in the GitHub AWS_DEPLOY_ROLE_ARN variable.
+    Value: !GetAtt GitHubReleaseRole.Arn
+  GitHubOidcSubject:
+    Description: Exact GitHub OIDC subject trusted by the release role.
+    Value: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:ref:refs/heads/${GitHubBranch}"
