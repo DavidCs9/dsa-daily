@@ -33,6 +33,24 @@ Route 53 (optional custom domain)
 
 The stack deploys to `us-east-2`. If a custom domain is enabled, its CloudFront ACM certificate must be in `us-east-1`.
 
+## AWS local access
+
+Local AWS access uses the saved `decs-admin` login profile:
+
+- Account: `225989371926`
+- Principal: `arn:aws:iam::225989371926:user/decs-admin`
+- Default region: `us-east-2`
+
+Start or renew the session when AWS asks you to authenticate:
+
+```bash
+aws login --profile decs-admin --region us-east-2
+export AWS_PROFILE=decs-admin
+aws sts get-caller-identity
+```
+
+The short-lived credentials rotate automatically every 15 minutes. The overall login session remains valid for up to 12 hours, so do not run `aws login` again while the current session still works. Tokens stay in the local AWS login cache and must never be committed to the repository.
+
 ## Deploy
 
 Authenticate first, then run:
