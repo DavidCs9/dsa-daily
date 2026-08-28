@@ -171,7 +171,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: ManageApiExecutionRole
+              - Sid: ManageApplicationExecutionRoles
                 Effect: Allow
                 Action:
                   - iam:CreateRole
@@ -187,8 +187,11 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                   - iam:UpdateAssumeRolePolicy
-                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dsa-daily-api-us-east-2"
-              - Sid: ManageApiFunction
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dsa-daily-api-us-east-2"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dsa-daily-reminder-us-east-2"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/dsa-daily-reminder-scheduler-us-east-2"
+              - Sid: ManageApplicationFunctions
                 Effect: Allow
                 Action:
                   - lambda:AddPermission
@@ -205,7 +208,9 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                   - lambda:PutRuntimeManagementConfig
-                Resource: !Sub "arn:${AWS::Partition}:lambda:us-east-2:${AWS::AccountId}:function:dsa-daily-api"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:us-east-2:${AWS::AccountId}:function:dsa-daily-api"
+                  - !Sub "arn:${AWS::Partition}:lambda:us-east-2:${AWS::AccountId}:function:dsa-daily-reminder"
               - Sid: ManageProgressTable
                 Effect: Allow
                 Action:
@@ -253,7 +258,56 @@ Resources:
                   - logs:UntagResource
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:us-east-2:${AWS::AccountId}:log-group:/aws/lambda/dsa-daily-api:*"
+                  - !Sub "arn:${AWS::Partition}:logs:us-east-2:${AWS::AccountId}:log-group:/aws/lambda/dsa-daily-reminder:*"
                   - !Sub "arn:${AWS::Partition}:logs:us-east-2:${AWS::AccountId}:log-group:/aws/api-gateway/dsa-daily:*"
+              - Sid: ManageReminderTopic
+                Effect: Allow
+                Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:GetTopicAttributes
+                  - sns:ListSubscriptionsByTopic
+                  - sns:ListTagsForResource
+                  - sns:SetTopicAttributes
+                  - sns:Subscribe
+                  - sns:TagResource
+                  - sns:UntagResource
+                Resource: !Sub "arn:${AWS::Partition}:sns:us-east-2:${AWS::AccountId}:dsa-daily-reminders"
+              - Sid: ManageReminderSubscriptionLifecycle
+                Effect: Allow
+                Action:
+                  - sns:GetSubscriptionAttributes
+                  - sns:SetSubscriptionAttributes
+                  - sns:Unsubscribe
+                Resource: "*"
+              - Sid: ReadSnsManagedKey
+                Effect: Allow
+                Action: kms:DescribeKey
+                Resource: !Sub "arn:${AWS::Partition}:kms:us-east-2:${AWS::AccountId}:key/*"
+                Condition:
+                  ForAnyValue:StringEquals:
+                    kms:ResourceAliases: alias/aws/sns
+              - Sid: ManageReminderSchedules
+                Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:DeleteSchedule
+                  - scheduler:GetSchedule
+                  - scheduler:UpdateSchedule
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:scheduler:us-east-2:${AWS::AccountId}:schedule/default/dsa-daily-practice-reminder"
+                  - !Sub "arn:${AWS::Partition}:scheduler:us-east-2:${AWS::AccountId}:schedule/default/dsa-daily-streak-reminder"
+              - Sid: ManageReminderDeadLetterQueue
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:ListQueueTags
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                  - sqs:UntagQueue
+                Resource: !Sub "arn:${AWS::Partition}:sqs:us-east-2:${AWS::AccountId}:dsa-daily-reminder-schedule-dlq"
               - Sid: ReadAndConfigureLogDelivery
                 Effect: Allow
                 Action:
