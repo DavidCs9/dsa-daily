@@ -89,6 +89,24 @@ test("uses private static hosting and an authenticated serverless persistence AP
   assert.doesNotMatch(`${template}\n${handler}`, /POWERTOOLS_METRICS_NAMESPACE|@aws-lambda-powertools\/metrics/);
 });
 
+test("provisions single-user SNS email reminders at 3 PM and 8 PM Mexico City time", async () => {
+  const [template, reminder] = await Promise.all([
+    readFile(new URL("../template.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/reminder.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(template, /ReminderTopic:\n\s+Type: AWS::SNS::Topic/);
+  assert.match(template, /KmsMasterKeyId: alias\/aws\/sns/);
+  assert.match(template, /Type: AWS::SNS::Subscription/);
+  assert.match(template, /ScheduleExpression: cron\(0 15 \* \* \? \*\)/);
+  assert.match(template, /ScheduleExpression: cron\(0 20 \* \* \? \*\)/);
+  assert.match(template, /ScheduleExpressionTimezone: America\/Mexico_City/g);
+  assert.match(template, /State: !If \[HasReminderEmail, ENABLED, DISABLED\]/);
+  assert.match(reminder, /evaluateReminder/);
+  assert.match(reminder, /PublishCommand/);
+  assert.match(reminder, /paginateQuery/);
+});
+
 test("deploys to AWS only for frontend or application infrastructure changes", () => {
   assert.deepEqual(classifyChanges(["README.md", "tests/app.test.mjs"]), {
     bootstrap: false,

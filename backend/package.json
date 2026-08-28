@@ -15,6 +15,7 @@
     "@aws-lambda-powertools/logger": "^2.35.0",
     "@aws-lambda-powertools/tracer": "^2.35.0",
     "@aws-sdk/client-dynamodb": "^3.1115.0",
+    "@aws-sdk/client-sns": "^3.1115.0",
     "@aws-sdk/lib-dynamodb": "^3.1115.0"
   },
   "devDependencies": {

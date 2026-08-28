@@ -30,6 +30,15 @@ The timer counts down to the focus target, then switches to overtime while retai
 
 Progress is stored in DynamoDB and follows the signed-in Cognito user across devices. Existing browser progress is imported once when the account has no server-side state.
 
+## Daily email reminders
+
+EventBridge Scheduler invokes a reminder Lambda every day in the `America/Mexico_City` timezone:
+
+- 3:00 PM — sends a practice reminder when no session has been logged that day.
+- 8:00 PM — sends a fallback only when no session has been logged and an active streak will expire at midnight.
+
+The Lambda reads the single configured Cognito user's progress partition and publishes to the encrypted, stack-owned `dsa-daily-reminders` SNS topic. The recipient defaults to `davidcastro.siq@gmail.com`; setting `ReminderEmailAddress` to blank disables both schedules. The first deployment sends an SNS subscription confirmation email, and reminders begin after that subscription is confirmed.
+
 ## AWS architecture
 
 ```text
@@ -43,6 +52,9 @@ Browser → shared Cognito user pool
         → HTTP API (JWT authorizer)
         → Powertools Event Handler Lambda
         → DynamoDB
+
+EventBridge Scheduler → Reminder Lambda → DynamoDB
+                                      └→ SNS → email
 ```
 
 The application stack deploys to `us-east-2` and reuses Cognito user pool `us-east-2_7LKDrgjB7`. It creates a DSA-specific public SPA client without a secret and does not modify or own the shared pool. If a custom domain is enabled, its CloudFront ACM certificate must be in `us-east-1`.

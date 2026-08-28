@@ -31,9 +31,22 @@ Parameters:
     Default: us-east-2_7LKDrgjB7
     AllowedPattern: "^us-east-2_[A-Za-z0-9]+$"
     Description: Existing us-east-2 Cognito user pool shared with this application.
+  ReminderUserId:
+    Type: String
+    Default: e19bf5c0-2061-7006-3008-e314008214fd
+    AllowedPattern: "^[0-9a-f-]{36}$"
+    Description: Cognito subject for the single account that receives daily reminders.
+  ReminderEmailAddress:
+    Type: String
+    Default: davidcastro.siq@gmail.com
+    AllowedPattern: "^$|^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    ConstraintDescription: Must be blank or a valid email address.
+    NoEcho: true
+    Description: Email endpoint for the DSA reminder SNS topic. Set to blank to keep schedules disabled.
 
 Conditions:
   HasCustomDomain: !Equals [!Ref EnableCustomDomain, "true"]
+  HasReminderEmail: !Not [!Equals [!Ref ReminderEmailAddress, ""]]
 
 Resources:
   SiteBucket:
@@ -243,6 +256,208 @@ Resources:
           Value: dsa-daily
         - Key: ManagedBy
           Value: CloudFormation
+
+  ReminderTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+      TopicName: !Sub "${AWS::StackName}-reminders"
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ReminderEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasReminderEmail
+    Properties:
+      Endpoint: !Ref ReminderEmailAddress
+      Protocol: email
+      TopicArn: !Ref ReminderTopic
+
+  ReminderFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-reminder"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ReminderFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-reminder-${AWS::Region}"
+      Description: Reads one user's DSA progress and publishes scheduled email reminders.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: dsa-daily-reminder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteFunctionLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-reminder:*"
+              - Sid: ReadUserProgress
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt ProgressTable.Arn
+              - Sid: PublishReminder
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref ReminderTopic
+              - Sid: UseSnsManagedKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  ForAnyValue:StringEquals:
+                    kms:ResourceAliases: alias/aws/sns
+              - Sid: PublishTraces
+                Effect: Allow
+                Action:
+                  - xray:PutTelemetryRecords
+                  - xray:PutTraceSegments
+                Resource: "*"
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ReminderScheduleDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      QueueName: !Sub "${AWS::StackName}-reminder-schedule-dlq"
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ReminderScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-reminder-scheduler-${AWS::Region}"
+      Description: Allows EventBridge Scheduler to invoke the DSA reminder Lambda.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-dsa-reminder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeReminderFunction
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ReminderFunction.Arn
+              - Sid: SendFailedInvocationsToDlq
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ReminderScheduleDeadLetterQueue.Arn
+      Tags:
+        - Key: Project
+          Value: dsa-daily
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ReminderFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ReminderFunctionLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/reminder.ts
+        Minify: true
+        Sourcemap: true
+        Target: es2022
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: backend/
+      Description: Sends single-user DSA practice and streak reminders through SNS.
+      Environment:
+        Variables:
+          APP_URL: !Ref WebOrigin
+          POWERTOOLS_LOG_LEVEL: INFO
+          POWERTOOLS_SERVICE_NAME: dsa-daily-reminder
+          REMINDER_TIME_ZONE: America/Mexico_City
+          REMINDER_USER_ID: !Ref ReminderUserId
+          TABLE_NAME: !Ref ProgressTable
+          TOPIC_ARN: !Ref ReminderTopic
+      Events:
+        AfternoonPracticeReminder:
+          Type: ScheduleV2
+          Properties:
+            DeadLetterConfig:
+              Arn: !GetAtt ReminderScheduleDeadLetterQueue.Arn
+            Description: Remind about today's DSA challenge at 3 PM Mexico City time.
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Input: '{"kind":"practice"}'
+            Name: !Sub "${AWS::StackName}-practice-reminder"
+            RoleArn: !GetAtt ReminderScheduleRole.Arn
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 2
+            ScheduleExpression: cron(0 15 * * ? *)
+            ScheduleExpressionTimezone: America/Mexico_City
+            State: !If [HasReminderEmail, ENABLED, DISABLED]
+        EveningStreakReminder:
+          Type: ScheduleV2
+          Properties:
+            DeadLetterConfig:
+              Arn: !GetAtt ReminderScheduleDeadLetterQueue.Arn
+            Description: Warn at 8 PM when the active DSA streak will expire at midnight.
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Input: '{"kind":"streak"}'
+            Name: !Sub "${AWS::StackName}-streak-reminder"
+            RoleArn: !GetAtt ReminderScheduleRole.Arn
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 2
+            ScheduleExpression: cron(0 20 * * ? *)
+            ScheduleExpressionTimezone: America/Mexico_City
+            State: !If [HasReminderEmail, ENABLED, DISABLED]
+      FunctionName: !Sub "${AWS::StackName}-reminder"
+      Handler: src/reminder.handler
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+        SystemLogLevel: INFO
+      MemorySize: 256
+      Role: !GetAtt ReminderFunctionRole.Arn
+      Runtime: nodejs24.x
+      Timeout: 30
+      Tracing: Active
+      Tags:
+        Project: dsa-daily
+        ManagedBy: CloudFormation
 
   ApiAccessLogGroup:
     Type: AWS::Logs::LogGroup
@@ -476,3 +691,6 @@ Outputs:
   ProgressTableName:
     Description: DynamoDB table that stores per-user progress and sessions.
     Value: !Ref ProgressTable
+  ReminderTopicArn:
+    Description: Encrypted SNS topic used for daily DSA reminder emails.
+    Value: !Ref ReminderTopic
