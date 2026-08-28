@@ -129,7 +129,7 @@ h2 { margin: 0 0 22px; font-family: var(--serif); font-size: 27px; font-weight: 
 .timer { margin: 43px auto 29px; display: flex; flex-direction: column; align-items: center; }
 .timer > span { font-variant-numeric: tabular-nums; font-size: clamp(64px, 13vw, 94px); line-height: 1; letter-spacing: -.065em; font-weight: 650; }
 .timer small { margin-top: 14px; color: var(--muted); font-family: var(--serif); font-size: 14px; font-style: italic; }
-.timer.expired > span { color: var(--brown); }
+.timer.targetReached > span { color: var(--brown); }
 .primary {
   min-width: 220px;
   border: 1px solid var(--green);

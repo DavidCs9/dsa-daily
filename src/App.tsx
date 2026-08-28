@@ -18,6 +18,7 @@ import {
 import { authConfigured, currentUser, login, logout, type AuthUser } from "./auth";
 import { calendarDays, summarizeActivity } from "./activity";
 import { problems } from "./problems";
+import { elapsedSessionSeconds, reachedSessionTarget } from "./session-timer";
 
 const STORAGE_KEY = "dsa-daily:v1";
 const SESSION_MINUTES = { Easy: 10, Medium: 20, Hard: 30 } as const;
@@ -505,7 +506,7 @@ function SessionView({
   onSignedOut: () => void;
 }) {
   const problem = problems[progress.index] ?? problems[0];
-  const [seconds, setSeconds] = useState(sessionSeconds(problem.difficulty));
+  const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
   const [started, setStarted] = useState(false);
   const [logging, setLogging] = useState(false);
@@ -516,7 +517,12 @@ function SessionView({
   const [justFinished, setJustFinished] = useState<HistoryEntry | null>(null);
   const [managing, setManaging] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const deadlineRef = useRef<number | null>(null);
+  const accumulatedSecondsRef = useRef(0);
+  const runningSinceRef = useRef<number | null>(null);
+  const targetNotificationSentRef = useRef(false);
+  const targetSeconds = sessionSeconds(problem.difficulty);
+  const targetReached = reachedSessionTarget(seconds, targetSeconds);
+  const displayedSeconds = targetReached ? seconds - targetSeconds : targetSeconds - seconds;
 
   const completedThisCycle = progress.index;
   const completedToday = useMemo(
@@ -525,67 +531,80 @@ function SessionView({
   );
   const activity = useMemo(() => summarizeActivity(progress.history), [progress.history]);
 
+  const announceTargetReached = useCallback((elapsed: number) => {
+    if (!reachedSessionTarget(elapsed, targetSeconds) || targetNotificationSentRef.current) return;
+    targetNotificationSentRef.current = true;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      new Notification(`${SESSION_MINUTES[problem.difficulty]}-minute focus target reached`, {
+        body: `${problem.title} is still being timed. Finish when you’re ready.`,
+        tag: "dsa-session-target",
+      });
+    } catch {
+      // The in-page target message remains available when system notifications fail.
+    }
+  }, [problem.difficulty, problem.title, targetSeconds]);
+
   useEffect(() => {
     if (!running) return;
     function tick() {
-      if (deadlineRef.current === null) return;
-      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
-      setSeconds(remaining);
-      if (remaining === 0) {
-        deadlineRef.current = null;
-        setRunning(false);
-        setLogging(true);
-      }
+      const elapsed = elapsedSessionSeconds(accumulatedSecondsRef.current, runningSinceRef.current, Date.now());
+      setSeconds(elapsed);
+      announceTargetReached(elapsed);
     }
     tick();
     timerRef.current = setInterval(tick, 250);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [running]);
+  }, [announceTargetReached, running]);
 
-  function currentRemainingSeconds() {
-    if (deadlineRef.current === null) return seconds;
-    return Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+  function currentElapsedSeconds() {
+    return elapsedSessionSeconds(accumulatedSecondsRef.current, runningSinceRef.current, Date.now());
   }
 
   function startSession() {
     window.open(problem.neetcode, "_blank", "noopener,noreferrer");
+    if ("Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission().catch(() => undefined);
+    }
     setJustFinished(null);
     setActionError("");
     setStarted(true);
     setRunning(true);
-    const allottedSeconds = sessionSeconds(problem.difficulty);
-    setSeconds(allottedSeconds);
-    deadlineRef.current = Date.now() + allottedSeconds * 1000;
+    setSeconds(0);
+    accumulatedSecondsRef.current = 0;
+    runningSinceRef.current = Date.now();
+    targetNotificationSentRef.current = false;
   }
 
   function finishSession() {
-    const remaining = currentRemainingSeconds();
-    deadlineRef.current = null;
-    setSeconds(remaining);
+    const elapsed = currentElapsedSeconds();
+    announceTargetReached(elapsed);
+    accumulatedSecondsRef.current = elapsed;
+    runningSinceRef.current = null;
+    setSeconds(elapsed);
     setRunning(false);
     setLogging(true);
   }
 
   function toggleTimer() {
     if (running) {
-      const remaining = currentRemainingSeconds();
-      deadlineRef.current = null;
-      setSeconds(remaining);
+      const elapsed = currentElapsedSeconds();
+      announceTargetReached(elapsed);
+      accumulatedSecondsRef.current = elapsed;
+      runningSinceRef.current = null;
+      setSeconds(elapsed);
       setRunning(false);
       return;
     }
-    if (seconds > 0) {
-      deadlineRef.current = Date.now() + seconds * 1000;
-      setRunning(true);
-    }
+    runningSinceRef.current = Date.now();
+    setRunning(true);
   }
 
   function returnToTimer() {
-    if (seconds <= 0) return;
     setLogging(false);
-    deadlineRef.current = Date.now() + seconds * 1000;
+    runningSinceRef.current = Date.now();
     setRunning(true);
   }
 
@@ -600,7 +619,7 @@ function SessionView({
         expectedVersion: progress.version,
         result,
         heuristic: heuristic.trim(),
-        durationSeconds: sessionSeconds(problem.difficulty) - seconds,
+        durationSeconds: seconds,
       });
       setProgress(saved.progress);
       cacheProgress(saved.progress);
@@ -610,16 +629,20 @@ function SessionView({
       setLogging(false);
       setResult(null);
       setHeuristic("");
-      deadlineRef.current = null;
-      setSeconds(sessionSeconds(problems[saved.progress.index].difficulty));
+      accumulatedSecondsRef.current = 0;
+      runningSinceRef.current = null;
+      targetNotificationSentRef.current = false;
+      setSeconds(0);
     } catch (error) {
       if (error instanceof ApiError && error.code === "progress_conflict") {
         const current = await loadProgress().catch(() => null);
         if (current) {
           setProgress(current);
           cacheProgress(current);
-          deadlineRef.current = null;
-          setSeconds(sessionSeconds(problems[current.index].difficulty));
+          accumulatedSecondsRef.current = 0;
+          runningSinceRef.current = null;
+          targetNotificationSentRef.current = false;
+          setSeconds(0);
         }
       }
       setActionError(messageFrom(error));
@@ -636,7 +659,10 @@ function SessionView({
       const restored = await undoSession(progress.version);
       setProgress(restored);
       cacheProgress(restored);
-      setSeconds(sessionSeconds(problems[restored.index].difficulty));
+      accumulatedSecondsRef.current = 0;
+      runningSinceRef.current = null;
+      targetNotificationSentRef.current = false;
+      setSeconds(0);
       setJustFinished(null);
     } catch (error) {
       setActionError(messageFrom(error));
@@ -696,9 +722,13 @@ function SessionView({
           <span className={problem.difficulty.toLowerCase()}>{problem.difficulty}</span>
         </div>
 
-        <div className={`timer ${seconds === 0 ? "expired" : ""}`} aria-label={`${formatTime(seconds)} remaining`}>
-          <span>{formatTime(seconds)}</span>
-          <small>{seconds === 0 ? "Time. Capture the result honestly." : `${SESSION_MINUTES[problem.difficulty]} focused minutes. That’s it.`}</small>
+        <div className={`timer ${targetReached ? "targetReached" : ""}`} aria-label={`${formatTime(seconds)} elapsed${targetReached ? `; ${formatTime(displayedSeconds)} past the focus target` : `; ${formatTime(displayedSeconds)} remaining`}`}>
+          <span>{targetReached ? "+" : ""}{formatTime(displayedSeconds)}</span>
+          <small>
+            {targetReached
+              ? `${SESSION_MINUTES[problem.difficulty]}-minute target reached · ${formatTime(seconds)} total focused time`
+              : `${SESSION_MINUTES[problem.difficulty]}-minute target. We’ll remind you, then keep counting.`}
+          </small>
         </div>
 
         {!started && !logging ? (
@@ -738,7 +768,7 @@ function SessionView({
             <input id="heuristic" maxLength={160} value={heuristic} onChange={(event) => setHeuristic(event.target.value)} placeholder="e.g. Track what I’ve already seen with a set" />
             <div className="logActions">
               <button className="primary" disabled={!result || saving} onClick={() => void logResult()} type="button">{saving ? "Saving…" : "Save & advance"}</button>
-              {seconds > 0 ? <button className="textButton" disabled={saving} onClick={returnToTimer} type="button">Back to timer</button> : null}
+              <button className="textButton" disabled={saving} onClick={returnToTimer} type="button">Back to timer</button>
             </div>
           </div>
         ) : null}
