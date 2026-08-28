@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 import { classifyChanges } from "../scripts/classify-changes.mjs";
+
+async function importTypeScriptModule(path) {
+  const source = await readFile(new URL(path, import.meta.url), "utf8");
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
+}
 
 test("builds a standalone Vite application", async () => {
   const [html, assets] = await Promise.all([
@@ -15,7 +24,7 @@ test("builds a standalone Vite application", async () => {
   assert.ok(assets.some((name) => name.endsWith(".css")));
 });
 
-test("keeps the full cycle and difficulty-based timers", async () => {
+test("keeps the full cycle and difficulty-based focus targets", async () => {
   const [problems, app] = await Promise.all([
     readFile(new URL("../src/problems.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/App.tsx", import.meta.url), "utf8"),
@@ -28,7 +37,10 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(app, /Save & advance/);
   assert.match(app, /Focused minutes/);
   assert.match(app, /Time not recorded/);
-  assert.match(app, /deadlineRef/);
+  assert.match(app, /elapsedSessionSeconds/);
+  assert.match(app, /Notification\.requestPermission/);
+  assert.match(app, /targetNotificationSentRef/);
+  assert.match(app, /then keep counting/);
   assert.match(app, /Set next problem/);
   assert.match(app, /Past sessions/);
   assert.match(app, /Activity calendar/);
@@ -39,6 +51,17 @@ test("keeps the full cycle and difficulty-based timers", async () => {
   assert.match(app, /Good work\. The next problem is ready\./);
   assert.match(app, /className="signOutButton"/);
   assert.doesNotMatch(app, />History<\/button>/);
+});
+
+test("tracks full elapsed time beyond the focus target", async () => {
+  const { elapsedSessionSeconds, reachedSessionTarget } = await importTypeScriptModule("../src/session-timer.ts");
+
+  assert.equal(elapsedSessionSeconds(1_195, 10_000, 16_000), 1_201);
+  assert.equal(elapsedSessionSeconds(1_201, null, 99_000), 1_201);
+  assert.equal(elapsedSessionSeconds(10, 20_000, 19_000), 10);
+  assert.equal(reachedSessionTarget(1_199, 1_200), false);
+  assert.equal(reachedSessionTarget(1_200, 1_200), true);
+  assert.equal(reachedSessionTarget(1_537, 1_200), true);
 });
 
 test("uses private static hosting and an authenticated serverless persistence API", async () => {

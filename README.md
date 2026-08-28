@@ -1,6 +1,6 @@
 # DSA Ready
 
-A low-friction NeetCode 150 practice loop: open the next problem, work against a difficulty-based timer, record the outcome, and advance automatically.
+A low-friction NeetCode 150 practice loop: open the next problem, work toward a difficulty-based focus target, record the outcome, and advance automatically.
 
 ## Local development
 
@@ -25,6 +25,8 @@ export VITE_COGNITO_USER_POOL_CLIENT_ID="your-dsa-spa-client-id"
 - Easy: 10 minutes
 - Medium: 20 minutes
 - Hard: 30 minutes
+
+The timer counts down to the focus target, then switches to overtime while retaining the full session length. When the target is reached, the app sends a browser notification (when permitted) and keeps timing until the session is finished or paused.
 
 Progress is stored in DynamoDB and follows the signed-in Cognito user across devices. Existing browser progress is imported once when the account has no server-side state.
 
